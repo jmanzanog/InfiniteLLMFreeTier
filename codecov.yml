@@ -1,0 +1,10 @@
+ignore:
+  - "pkg/api/openapi_generated.go"
+  - "**/*_generated.go"
+  - "**/mocks/**"
+coverage:
+  status:
+    project:
+      default:
+        target: auto
+        threshold: 1%
