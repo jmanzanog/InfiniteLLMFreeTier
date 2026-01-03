@@ -5,7 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -61,7 +61,7 @@ func (p *baseProvider) prepareRequest(req *api.CreateChatCompletionRequest) ([]b
 
 	// Force default model if requested model differs (basic enforcement)
 	if localReq.Model != p.config.DefaultModel {
-		log.Printf("[Provider] Swapping model '%s' to '%s' for provider %s", localReq.Model, p.config.DefaultModel, p.config.Name)
+		slog.Info("Swapping model", "component", "provider", "provider_name", p.config.Name, "from", localReq.Model, "to", p.config.DefaultModel)
 		localReq.Model = p.config.DefaultModel
 	}
 
@@ -109,7 +109,7 @@ func (p *baseProvider) prepareRequest(req *api.CreateChatCompletionRequest) ([]b
 	if len(logBody) > 200 {
 		logBody = logBody[:200] + "..."
 	}
-	log.Printf("[Provider] %s Request Body: %s", p.config.Name, logBody)
+	slog.Info("Request Body", "component", "provider", "provider_name", p.config.Name, "body_truncated", logBody)
 
 	return body, nil
 }
