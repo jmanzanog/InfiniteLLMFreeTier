@@ -75,7 +75,7 @@ jobs:
               with:
                   version: v2.7.2
 
-            - name: Test (all tests including E2E with Testcontainers)
+            - name: Test (all tests)
               run: go test -v ./... -race -coverprofile=coverage.txt -covermode=atomic -timeout 10m
 
             - name: Upload coverage reports to Codecov
