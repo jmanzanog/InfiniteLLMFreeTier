@@ -41,8 +41,8 @@ func TestBalancer_All(t *testing.T) {
 		p2 := &mockProvider{name: "p2", code: 200}
 		lb := NewBalancer([]provider.Provider{p1, p2})
 
-		lb.Chat(context.Background(), &api.CreateChatCompletionRequest{})
-		lb.Chat(context.Background(), &api.CreateChatCompletionRequest{})
+		_, _ = lb.Chat(context.Background(), &api.CreateChatCompletionRequest{})
+		_, _ = lb.Chat(context.Background(), &api.CreateChatCompletionRequest{})
 	})
 
 	t.Run("Failover_5xx", func(t *testing.T) {

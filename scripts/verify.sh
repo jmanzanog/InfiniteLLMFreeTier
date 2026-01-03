@@ -15,25 +15,20 @@ echo "--- Running golangci-lint ---"
 if command -v golangci-lint >/dev/null 2>&1; then
     golangci-lint run
 else
-    echo "golangci-lint is not installed. Skipping linting."
-fi
-
 echo "--- Running Security Check (govulncheck) ---"
 if command -v govulncheck >/dev/null 2>&1; then
     govulncheck ./...
 else
-    echo "govulncheck is not installed. Installing..."
-    go install golang.org/x/vuln/cmd/govulncheck@latest
-    govulncheck ./...
+    echo "govulncheck not in PATH. Running via go run..."
+    go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 fi
 
 echo "--- Running Security Audit (gosec) ---"
 if command -v gosec >/dev/null 2>&1; then
     gosec ./...
 else
-    echo "gosec is not installed. Installing..."
-    go install github.com/securego/gosec/v2/cmd/gosec@latest
-    gosec ./...
+    echo "gosec not in PATH. Running via go run..."
+    go run github.com/securego/gosec/v2/cmd/gosec@latest ./...
 fi
 
 echo "--- Running tests (Postgres + Oracle) ---"

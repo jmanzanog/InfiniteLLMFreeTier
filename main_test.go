@@ -142,9 +142,9 @@ func TestGateway_E2E(t *testing.T) {
 
 func TestRunAndMain(t *testing.T) {
 	os.Clearenv()
-	os.Setenv("GROQ_API_KEY", "test")
+	_ = os.Setenv("GROQ_API_KEY", "test")
 	oldListen := listenAndServe
 	defer func() { listenAndServe = oldListen }()
 	listenAndServe = func(addr string, handler http.Handler) error { return nil }
-	run()
+	_ = run()
 }

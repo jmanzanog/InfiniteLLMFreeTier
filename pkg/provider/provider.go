@@ -318,7 +318,7 @@ func (p *GeminiProvider) Chat(ctx context.Context, req *api.CreateChatCompletion
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// 4. Read Gemini response
 	geminiRespBytes, err := io.ReadAll(resp.Body)

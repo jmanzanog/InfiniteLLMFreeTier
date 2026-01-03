@@ -46,7 +46,7 @@ func TestPrepareRequest_Logic(t *testing.T) {
 	t.Run("Model_Swap_And_Null_Cleaning", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var body map[string]interface{}
-			json.NewDecoder(r.Body).Decode(&body)
+			_ = json.NewDecoder(r.Body).Decode(&body)
 
 			// Check Model Swap
 			if body["model"] != "default-model" {
@@ -92,7 +92,7 @@ func TestPrepareRequest_Logic(t *testing.T) {
 				{Role: "user", Content: longText},
 			},
 		}
-		p.Chat(context.Background(), req)
+		_, _ = p.Chat(context.Background(), req)
 	})
 
 	t.Run("Recursive_Null_Cleaning", func(t *testing.T) {
@@ -124,7 +124,7 @@ func TestGeminiProvider_Complete(t *testing.T) {
 					} `json:"parts"`
 				} `json:"contents"`
 			}
-			json.NewDecoder(r.Body).Decode(&gReq)
+			_ = json.NewDecoder(r.Body).Decode(&gReq)
 
 			if len(gReq.Contents) != 2 {
 				t.Fatalf("Expected 2 contents, got %d", len(gReq.Contents))
@@ -137,7 +137,7 @@ func TestGeminiProvider_Complete(t *testing.T) {
 			}
 
 			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(`{ "candidates": [ { "content": { "parts": [ { "text": "I am Gemini" } ] } } ] }`))
+			_, _ = w.Write([]byte(`{ "candidates": [ { "content": { "parts": [ { "text": "I am Gemini" } ] } } ] }`))
 		}))
 		defer server.Close()
 
@@ -161,11 +161,11 @@ func TestGeminiProvider_Complete(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 
 		// Check converted response
 		var openAIResp map[string]interface{}
-		json.NewDecoder(resp.Body).Decode(&openAIResp)
+		_ = json.NewDecoder(resp.Body).Decode(&openAIResp)
 		content := openAIResp["choices"].([]interface{})[0].(map[string]interface{})["message"].(map[string]interface{})["content"]
 		if content != "I am Gemini" {
 			t.Errorf("Expected 'I am Gemini', got %v", content)
@@ -175,7 +175,7 @@ func TestGeminiProvider_Complete(t *testing.T) {
 	t.Run("Upstream_Error_Pass_Through", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(429)
-			w.Write([]byte(`{"error": "rate limit"}`))
+			_, _ = w.Write([]byte(`{"error": "rate limit"}`))
 		}))
 		defer server.Close()
 
@@ -189,7 +189,7 @@ func TestGeminiProvider_Complete(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Unexpected error: %v", err)
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 
 		if resp.StatusCode != 429 {
 			t.Errorf("Expected 429, got %d", resp.StatusCode)
@@ -203,7 +203,7 @@ func TestGeminiProvider_Complete(t *testing.T) {
 
 	t.Run("Bad_Gemini_Response", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Write([]byte(`{ invalid json }`))
+			_, _ = w.Write([]byte(`{ invalid json }`))
 		}))
 		defer server.Close()
 
@@ -283,7 +283,7 @@ func TestProviders_Chat_Success(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(200)
-				w.Write([]byte(`{}`))
+				_, _ = w.Write([]byte(`{}`))
 			}))
 			defer server.Close()
 
