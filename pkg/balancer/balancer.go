@@ -14,7 +14,7 @@ import (
 
 type Balancer struct {
 	providers []provider.Provider
-	current   uint32
+	current   uint64
 }
 
 func NewBalancer(providers []provider.Provider) *Balancer {
@@ -28,10 +28,10 @@ func (b *Balancer) Chat(ctx context.Context, req *api.CreateChatCompletionReques
 		return nil, fmt.Errorf("no providers available")
 	}
 
-	numProviders := uint32(len(b.providers))
+	numProviders := uint64(len(b.providers))
 
-	for i := uint32(0); i < numProviders; i++ {
-		idx := (atomic.AddUint32(&b.current, 1) - 1) % numProviders
+	for i := uint64(0); i < numProviders; i++ {
+		idx := (atomic.AddUint64(&b.current, 1) - 1) % numProviders
 		p := b.providers[idx]
 
 		log.Printf("[Balancer] Forwarding request to provider: %s", p.Name())

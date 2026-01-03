@@ -56,7 +56,7 @@ func (s *Server) CreateChatCompletion(ctx context.Context, request api.CreateCha
 			slog.Error("Error reading response body for logging", "error", err)
 		}
 		// Restore the body so it can be read again
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		resp.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
 
 		slog.Info("Upstream response details",

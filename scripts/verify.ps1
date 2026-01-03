@@ -19,6 +19,24 @@ else {
     Write-Host "golangci-lint is not installed. Skipping linting." -ForegroundColor Yellow
 }
 
+Write-Host "--- Running Security Check (govulncheck) ---" -ForegroundColor Cyan
+if (Get-Command govulncheck -ErrorAction SilentlyContinue) {
+    govulncheck ./...
+} else {
+    Write-Host "govulncheck is not installed. Installing..." -ForegroundColor Yellow
+    go install golang.org/x/vuln/cmd/govulncheck@latest
+    govulncheck ./...
+}
+
+Write-Host "--- Running Security Audit (gosec) ---" -ForegroundColor Cyan
+if (Get-Command gosec -ErrorAction SilentlyContinue) {
+    gosec ./...
+} else {
+    Write-Host "gosec is not installed. Installing..." -ForegroundColor Yellow
+    go install github.com/securego/gosec/v2/cmd/gosec@latest
+    gosec ./...
+}
+
 Write-Host "--- Running tests (Postgres + Oracle) ---" -ForegroundColor Cyan
 go test -v ./...
 
