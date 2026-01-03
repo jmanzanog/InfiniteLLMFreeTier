@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"sync/atomic"
 
@@ -34,10 +34,10 @@ func (b *Balancer) Chat(ctx context.Context, req *api.CreateChatCompletionReques
 		idx := (atomic.AddUint64(&b.current, 1) - 1) % numProviders
 		p := b.providers[idx]
 
-		log.Printf("[Balancer] Forwarding request to provider: %s", p.Name())
+		slog.Info("Forwarding request", "component", "balancer", "provider", p.Name())
 		resp, err := p.Chat(ctx, req)
 		if err != nil {
-			log.Printf("[Balancer] Provider %s high-level transport error: %v. Retrying...", p.Name(), err)
+			slog.Warn("Provider transport error", "component", "balancer", "provider", p.Name(), "error", err)
 			continue
 		}
 
@@ -45,15 +45,15 @@ func (b *Balancer) Chat(ctx context.Context, req *api.CreateChatCompletionReques
 		// Do NOT retry on 401/403 (Unauthorized/Forbidden) as those are permanent credential issues.
 		if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusUnauthorized && resp.StatusCode != http.StatusForbidden && resp.StatusCode < 600 {
 			bodyBytes, _ := io.ReadAll(resp.Body)
-			log.Printf("[Balancer] Provider %s returned error status %d. Body: %s. Failover initiated...", p.Name(), resp.StatusCode, string(bodyBytes))
+			slog.Warn("Provider error status (failover)", "component", "balancer", "provider", p.Name(), "status", resp.StatusCode, "body", string(bodyBytes))
 			_ = resp.Body.Close()
 			continue
 		}
 
 		if resp.StatusCode == http.StatusOK {
-			log.Printf("[Balancer] Provider %s responded with status 200 (Success)", p.Name())
+			slog.Info("Provider success", "component", "balancer", "provider", p.Name())
 		} else {
-			log.Printf("[Balancer] Provider %s responded with status %d (Final Response)", p.Name(), resp.StatusCode)
+			slog.Info("Provider final response", "component", "balancer", "provider", p.Name(), "status", resp.StatusCode)
 		}
 		return resp, nil
 	}
