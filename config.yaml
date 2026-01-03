@@ -1,0 +1,14 @@
+providers:
+  groq:
+    default_model: "openai/gpt-oss-120b"
+  cerebras:
+    default_model: "gpt-oss-120b"
+  openrouter:
+    #default_model: "nvidia/nemotron-3-nano-30b-a3b:free"
+    default_model: "openai/gpt-oss-120b"
+    #default_model: "nvidia/nemotron-3-nano-30b-a3b"
+  mistral:
+    #default_model: "mistral-large-2512"
+    default_model: "ministral-3b-2512"
+  gemini:
+    default_model: "gemini-2.5-flash"
