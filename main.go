@@ -138,6 +138,13 @@ func run() error {
 
 	r := chi.NewRouter()
 
+	// Health endpoint for Kubernetes liveness/readiness probes
+	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
+	})
+
 	// NewStrictHandler returns a ServerInterface
 	strictHandler := api.NewStrictHandler(server, nil)
 
@@ -148,7 +155,7 @@ func run() error {
 		BaseURL:    "/v1",
 	})
 
-	slog.Info("Gateway started", "port", port)
+	slog.Info("Gateway started", "port", port, "health_endpoint", "/health")
 	return listenAndServe(":"+port, r)
 }
 

@@ -148,3 +148,114 @@ func TestRunAndMain(t *testing.T) {
 	listenAndServe = func(addr string, handler http.Handler) error { return nil }
 	_ = run()
 }
+
+func TestHealthEndpoint(t *testing.T) {
+	// Create a minimal router with only the health endpoint
+	r := chi.NewRouter()
+	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
+	})
+
+	ts := httptest.NewServer(r)
+	defer ts.Close()
+
+	t.Run("Health_Returns_200_OK", func(t *testing.T) {
+		resp, err := http.Get(ts.URL + "/health")
+		if err != nil {
+			t.Fatalf("Failed to call /health: %v", err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("Expected 200, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("Health_Returns_JSON_Content_Type", func(t *testing.T) {
+		resp, err := http.Get(ts.URL + "/health")
+		if err != nil {
+			t.Fatalf("Failed to call /health: %v", err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+
+		contentType := resp.Header.Get("Content-Type")
+		if contentType != "application/json" {
+			t.Errorf("Expected Content-Type 'application/json', got '%s'", contentType)
+		}
+	})
+
+	t.Run("Health_Returns_Status_OK_Body", func(t *testing.T) {
+		resp, err := http.Get(ts.URL + "/health")
+		if err != nil {
+			t.Fatalf("Failed to call /health: %v", err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+
+		buf := new(bytes.Buffer)
+		_, _ = buf.ReadFrom(resp.Body)
+		body := buf.String()
+
+		expected := `{"status":"ok"}`
+		if body != expected {
+			t.Errorf("Expected body '%s', got '%s'", expected, body)
+		}
+	})
+}
+
+func TestHealthEndpoint_Integration(t *testing.T) {
+	// Test health endpoint integrated with the full router (like run() sets up)
+	mockUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id":"ok"}`))
+	}))
+	defer mockUpstream.Close()
+
+	r := chi.NewRouter()
+
+	// Health endpoint (same as in run())
+	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
+	})
+
+	// Mount OpenAI handler
+	p := provider.NewCustomProvider("Test", mockUpstream.URL, "key", "test-model")
+	lb := balancer.NewBalancer([]provider.Provider{p})
+	server := NewServer(lb)
+	strictHandler := api.NewStrictHandler(server, nil)
+	api.HandlerWithOptions(strictHandler, api.ChiServerOptions{
+		BaseRouter: r,
+		BaseURL:    "/v1",
+	})
+
+	ts := httptest.NewServer(r)
+	defer ts.Close()
+
+	t.Run("Health_Works_Alongside_API", func(t *testing.T) {
+		// Test /health
+		healthResp, err := http.Get(ts.URL + "/health")
+		if err != nil {
+			t.Fatalf("Failed to call /health: %v", err)
+		}
+		defer func() { _ = healthResp.Body.Close() }()
+
+		if healthResp.StatusCode != http.StatusOK {
+			t.Errorf("Health: Expected 200, got %d", healthResp.StatusCode)
+		}
+
+		// Test /v1/chat/completions still works
+		jsonBody := `{"model":"gpt-4","messages":[{"role":"user","content":"hello"}]}`
+		apiResp, err := http.Post(ts.URL+"/v1/chat/completions", "application/json", bytes.NewBufferString(jsonBody))
+		if err != nil {
+			t.Fatalf("Failed to call /v1/chat/completions: %v", err)
+		}
+		defer func() { _ = apiResp.Body.Close() }()
+
+		if apiResp.StatusCode != http.StatusOK {
+			t.Errorf("API: Expected 200, got %d", apiResp.StatusCode)
+		}
+	})
+}
