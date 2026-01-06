@@ -66,6 +66,15 @@ go run main.go
 
 The gateway will be available at `http://localhost:8080/v1/chat/completions`.
 
+### Health Endpoint
+
+A `/health` endpoint is available for Kubernetes liveness/readiness probes:
+
+```bash
+curl http://localhost:8080/health
+# Returns: {"status":"ok"}
+```
+
 ## 🐳 Docker
 
 Build and run the containerized gateway using the optimized, scratch-based image:
