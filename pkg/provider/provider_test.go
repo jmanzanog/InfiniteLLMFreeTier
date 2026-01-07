@@ -96,10 +96,42 @@ func TestPrepareRequest_Logic(t *testing.T) {
 	})
 
 	t.Run("Recursive_Null_Cleaning", func(t *testing.T) {
-		// To test nested cleaning, we rely on the implementation detail that prepareRequest unmarshals to map[string]interface{}
-		// But api.CreateChatCompletionRequest structure is flat-ish.
-		// However, 'messages' is a slice of structs.
-		// We'll trust the previous test covers basic null cleaning.
+		// Test that nested maps and slices are cleaned recursively
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var body map[string]interface{}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			// Messages should be present and each message should not have null fields
+			if msgs, ok := body["messages"].([]interface{}); ok {
+				for _, m := range msgs {
+					if msg, ok := m.(map[string]interface{}); ok {
+						// Verify no null values in nested map
+						for k, v := range msg {
+							if v == nil {
+								t.Errorf("Null value found for key %s in message", k)
+							}
+						}
+					}
+				}
+			}
+			w.WriteHeader(200)
+		}))
+		defer server.Close()
+
+		p := NewCustomProvider("Test", server.URL, "key", "model")
+
+		// Request with messages that have nested structures
+		req := &api.CreateChatCompletionRequest{
+			Model: "model",
+			Messages: []api.ChatCompletionRequestMessage{
+				{Role: "user", Content: "hello"},
+				{Role: "assistant", Content: "hi there"},
+			},
+		}
+
+		_, err := p.Chat(context.Background(), req)
+		if err != nil {
+			t.Fatal(err)
+		}
 	})
 }
 
@@ -306,6 +338,143 @@ func TestProviders_Chat_Success(t *testing.T) {
 			})
 			if err != nil {
 				t.Errorf("%s Chat failed: %v", tt.name, err)
+			}
+		})
+	}
+}
+
+func TestOpenRouter_Headers(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Verify custom headers
+		if r.Header.Get("HTTP-Referer") == "" {
+			t.Error("Missing HTTP-Referer header")
+		}
+		if r.Header.Get("X-Title") == "" {
+			t.Error("Missing X-Title header")
+		}
+		w.WriteHeader(200)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+
+	p := NewOpenRouterProvider("key", "")
+	op := p.(*OpenRouterProvider)
+	op.config.BaseURL = server.URL
+
+	_, err := p.Chat(context.Background(), &api.CreateChatCompletionRequest{
+		Messages: []api.ChatCompletionRequestMessage{{Role: "user", Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestGemini_EmptyContent(t *testing.T) {
+	// Test when content is not a string (like an array or object)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{ "candidates": [ { "content": { "parts": [ { "text": "ok" } ] } } ] }`))
+	}))
+	defer server.Close()
+
+	p := NewGeminiProvider("k", "")
+	gp := p.(*GeminiProvider)
+	gp.config.BaseURL = server.URL + "/"
+
+	// Message with no content field value (becomes empty string)
+	req := &api.CreateChatCompletionRequest{
+		Messages: []api.ChatCompletionRequestMessage{
+			{Role: "user", Content: ""}, // Empty content - should be skipped
+			{Role: "user", Content: "valid"},
+		},
+	}
+
+	resp, err := gp.Chat(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+}
+
+func TestGemini_EmptyCandidates(t *testing.T) {
+	// Test when Gemini returns empty candidates
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{ "candidates": [] }`))
+	}))
+	defer server.Close()
+
+	p := NewGeminiProvider("k", "")
+	gp := p.(*GeminiProvider)
+	gp.config.BaseURL = server.URL + "/"
+
+	req := &api.CreateChatCompletionRequest{
+		Messages: []api.ChatCompletionRequestMessage{{Role: "user", Content: "test"}},
+	}
+
+	resp, err := gp.Chat(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	// Should return empty content but no error
+	var openAIResp map[string]interface{}
+	_ = json.NewDecoder(resp.Body).Decode(&openAIResp)
+	content := openAIResp["choices"].([]interface{})[0].(map[string]interface{})["message"].(map[string]interface{})["content"]
+	if content != "" {
+		t.Errorf("Expected empty content, got %v", content)
+	}
+}
+
+func TestGemini_EmptyParts(t *testing.T) {
+	// Test when Gemini returns empty parts
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{ "candidates": [ { "content": { "parts": [] } } ] }`))
+	}))
+	defer server.Close()
+
+	p := NewGeminiProvider("k", "")
+	gp := p.(*GeminiProvider)
+	gp.config.BaseURL = server.URL + "/"
+
+	req := &api.CreateChatCompletionRequest{
+		Messages: []api.ChatCompletionRequestMessage{{Role: "user", Content: "test"}},
+	}
+
+	resp, err := gp.Chat(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	var openAIResp map[string]interface{}
+	_ = json.NewDecoder(resp.Body).Decode(&openAIResp)
+	content := openAIResp["choices"].([]interface{})[0].(map[string]interface{})["message"].(map[string]interface{})["content"]
+	if content != "" {
+		t.Errorf("Expected empty content, got %v", content)
+	}
+}
+
+func TestConstructors_WithCustomModels(t *testing.T) {
+	tests := []struct {
+		name        string
+		constructor func(string, string) Provider
+		customModel string
+	}{
+		{"Groq", NewGroqProvider, "custom-groq-model"},
+		{"Mistral", NewMistralProvider, "custom-mistral-model"},
+		{"OpenRouter", NewOpenRouterProvider, "custom-openrouter-model"},
+		{"Cerebras", NewCerebrasProvider, "custom-cerebras-model"},
+		{"Gemini", NewGeminiProvider, "custom-gemini-model"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name+"_CustomModel", func(t *testing.T) {
+			p := tt.constructor("key", tt.customModel)
+			if p.Name() != tt.name {
+				t.Errorf("Expected name %s, got %s", tt.name, p.Name())
 			}
 		})
 	}

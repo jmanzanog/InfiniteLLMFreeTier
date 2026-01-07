@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -15,6 +16,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jmanzanog/InfiniteLLMFreeTier/pkg/api"
 	"github.com/jmanzanog/InfiniteLLMFreeTier/pkg/balancer"
+	"github.com/jmanzanog/InfiniteLLMFreeTier/pkg/metrics"
 	"github.com/jmanzanog/InfiniteLLMFreeTier/pkg/provider"
 	"github.com/joho/godotenv"
 	"gopkg.in/yaml.v3"
@@ -26,7 +28,6 @@ var (
 )
 
 // Server implements api.StrictServerInterface
-
 type Server struct {
 	api.Unimplemented
 	lb *balancer.Balancer
@@ -44,11 +45,13 @@ func (s *Server) CreateChatCompletion(ctx context.Context, request api.CreateCha
 
 	slog.Info("Incoming request", "model", request.Body.Model)
 
-	resp, err := s.lb.Chat(ctx, request.Body)
+	result, err := s.lb.ChatWithResult(ctx, request.Body)
 	if err != nil {
 		slog.Error("Error forwarding request", "error", err)
 		return nil, err
 	}
+
+	resp := result.Response
 
 	if os.Getenv("LOG_LLM_RESPONSE_DETAILS") == "true" {
 		bodyBytes, err := io.ReadAll(resp.Body)
@@ -66,16 +69,22 @@ func (s *Server) CreateChatCompletion(ctx context.Context, request api.CreateCha
 			"body", string(bodyBytes),
 		)
 	} else {
-		slog.Info("Upstream response received", "status", resp.Status)
+		slog.Info("Upstream response received", "status", resp.Status, "provider", result.ProviderName, "response_time_ms", result.ResponseTime.Milliseconds())
 	}
 
 	// We return a custom response object to handle both JSON and Streaming
-	return &ProxyResponse{resp: resp}, nil
+	return &ProxyResponse{
+		resp:         resp,
+		providerName: result.ProviderName,
+		responseTime: result.ResponseTime.Milliseconds(),
+	}, nil
 }
 
 // ProxyResponse implements api.CreateChatCompletionResponseObject
 type ProxyResponse struct {
-	resp *http.Response
+	resp         *http.Response
+	providerName string
+	responseTime int64
 }
 
 func (r *ProxyResponse) VisitCreateChatCompletionResponse(w http.ResponseWriter) error {
@@ -87,6 +96,11 @@ func (r *ProxyResponse) VisitCreateChatCompletionResponse(w http.ResponseWriter)
 			w.Header().Add(k, v)
 		}
 	}
+
+	// Add custom headers with provider info
+	w.Header().Set("X-Provider", r.providerName)
+	w.Header().Set("X-Response-Time-Ms", fmt.Sprintf("%d", r.responseTime))
+
 	w.WriteHeader(r.resp.StatusCode)
 
 	// Stream or copy body
@@ -128,12 +142,36 @@ func run() error {
 		port = "8080"
 	}
 
+	// Initialize metrics store
+	dbPath := os.Getenv("METRICS_DB_PATH")
+	if dbPath == "" {
+		dbPath = "metrics.db"
+	}
+
+	metricsStore, err := metrics.NewStore(dbPath)
+	if err != nil {
+		slog.Warn("Failed to initialize metrics store, running without metrics", "error", err)
+		metricsStore = nil
+	}
+
+	var collector *metrics.Collector
+	if metricsStore != nil {
+		collector = metrics.NewCollector(metricsStore, 1000)
+		defer func() { _ = collector.Close() }()
+		slog.Info("Metrics collection enabled", "db_path", dbPath)
+	}
+
 	providers := getProvidersFromEnv()
 	if len(providers) == 0 {
 		return fmt.Errorf("no provider API keys configured")
 	}
 
-	lb := balancer.NewBalancer(providers)
+	var lb *balancer.Balancer
+	if collector != nil {
+		lb = balancer.NewBalancerWithMetrics(providers, collector)
+	} else {
+		lb = balancer.NewBalancer(providers)
+	}
 	server := NewServer(lb)
 
 	r := chi.NewRouter()
@@ -143,6 +181,30 @@ func run() error {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"status":"ok"}`))
+	})
+
+	// Stats endpoint for metrics
+	r.Get("/stats", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		if collector == nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"error":"metrics collection not enabled"}`))
+			return
+		}
+
+		stats, err := collector.GetStats()
+		if err != nil {
+			slog.Error("Failed to get stats", "error", err)
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(`{"error":"failed to retrieve stats"}`))
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		if err := json.NewEncoder(w).Encode(stats); err != nil {
+			slog.Error("Failed to encode stats", "error", err)
+		}
 	})
 
 	// NewStrictHandler returns a ServerInterface
@@ -155,7 +217,7 @@ func run() error {
 		BaseURL:    "/v1",
 	})
 
-	slog.Info("Gateway started", "port", port, "health_endpoint", "/health")
+	slog.Info("Gateway started", "port", port, "health_endpoint", "/health", "stats_endpoint", "/stats")
 	return listenAndServe(":"+port, r)
 }
 
