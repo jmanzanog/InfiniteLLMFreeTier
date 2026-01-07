@@ -22,18 +22,19 @@ type RequestRecord struct {
 
 // ProviderStats represents aggregated statistics for a provider
 type ProviderStats struct {
-	Provider      string  `json:"provider"`
-	TotalRequests int64   `json:"total_requests"`
-	SuccessCount  int64   `json:"success_count"`
-	FailureCount  int64   `json:"failure_count"`
-	SuccessRate   float64 `json:"success_rate_percent"`
-	AvgResponseMs float64 `json:"avg_response_ms"`
-	MinResponseMs int64   `json:"min_response_ms"`
-	MaxResponseMs int64   `json:"max_response_ms"`
-	Error429Count int64   `json:"error_429_count"`
-	Error500Count int64   `json:"error_5xx_count"`
-	Error400Count int64   `json:"error_4xx_count"`
-	LastRequestAt string  `json:"last_request_at,omitempty"`
+	Provider        string  `json:"provider"`
+	TotalRequests   int64   `json:"total_requests"`
+	SuccessCount    int64   `json:"success_count"`
+	FailureCount    int64   `json:"failure_count"`
+	SuccessRate     float64 `json:"success_rate_percent"`
+	AvgResponseMs   float64 `json:"avg_response_ms"`
+	MinResponseMs   int64   `json:"min_response_ms"`
+	MaxResponseMs   int64   `json:"max_response_ms"`
+	Error429Count   int64   `json:"error_429_count"`
+	Error500Count   int64   `json:"error_5xx_count"`
+	Error400Count   int64   `json:"error_4xx_count"`
+	ErrorOtherCount int64   `json:"error_other_count"`
+	LastRequestAt   string  `json:"last_request_at,omitempty"`
 }
 
 // GlobalStats represents overall gateway statistics
@@ -199,6 +200,7 @@ func (s *sqliteStore) GetGlobalStats() (*GlobalStats, error) {
 		SUM(CASE WHEN status_code = 429 THEN 1 ELSE 0 END) as error_429,
 		SUM(CASE WHEN status_code >= 500 AND status_code < 600 THEN 1 ELSE 0 END) as error_5xx,
 		SUM(CASE WHEN status_code >= 400 AND status_code < 500 AND status_code != 429 THEN 1 ELSE 0 END) as error_4xx,
+		SUM(CASE WHEN success = 0 AND (status_code < 400 OR status_code >= 600) THEN 1 ELSE 0 END) as error_other,
 		MAX(created_at) as last_request
 	FROM requests
 	GROUP BY provider
@@ -224,6 +226,7 @@ func (s *sqliteStore) GetGlobalStats() (*GlobalStats, error) {
 			&ps.Error429Count,
 			&ps.Error500Count,
 			&ps.Error400Count,
+			&ps.ErrorOtherCount,
 			&lastRequest,
 		)
 		if err != nil {

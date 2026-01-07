@@ -243,6 +243,7 @@
                     <th>429 Errors</th>
                     <th>5xx Errors</th>
                     <th>4xx Errors</th>
+                    <th>Other Errors</th>
                 </tr>
             </thead>
             <tbody>
@@ -259,6 +260,8 @@
                             class="badge badge-error">{{.Error500Count}}</span>{{else}}0{{end}}</td>
                     <td>{{if gt .Error400Count 0}}<span
                             class="badge badge-warning">{{.Error400Count}}</span>{{else}}0{{end}}</td>
+                    <td>{{if gt .ErrorOtherCount 0}}<span
+                            class="badge badge-error">{{.ErrorOtherCount}}</span>{{else}}0{{end}}</td>
                 </tr>
                 {{end}}
                 {{if not .Providers}}
