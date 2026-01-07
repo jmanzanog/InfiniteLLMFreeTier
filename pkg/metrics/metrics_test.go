@@ -12,7 +12,9 @@ import (
 type mockStore struct {
 	saveErr       error
 	statsErr      error
+	purgeErr      error
 	saveCount     int32
+	purgeCount    int32
 	closed        bool
 	statsToReturn *GlobalStats
 }
@@ -42,7 +44,8 @@ func (m *mockStore) Close() error {
 }
 
 func (m *mockStore) PurgeOldMetrics(_ int) error {
-	return nil
+	atomic.AddInt32(&m.purgeCount, 1)
+	return m.purgeErr
 }
 
 func TestStore_SaveAndRetrieve(t *testing.T) {
@@ -494,4 +497,57 @@ func TestCollector_WithMockStore(t *testing.T) {
 	if stats.TotalRequests != 42 {
 		t.Errorf("Expected 42 requests, got %d", stats.TotalRequests)
 	}
+}
+
+func TestCollector_StartPurger(t *testing.T) {
+	t.Run("InvalidDays", func(t *testing.T) {
+		mock := &mockStore{}
+		collector := NewCollector(mock, 10)
+		defer func() { _ = collector.Close() }()
+
+		// Should return immediately
+		collector.StartPurger(0, time.Hour)
+		collector.StartPurger(-1, time.Hour)
+
+		if atomic.LoadInt32(&mock.purgeCount) > 0 {
+			t.Error("Expected no purge calls for invalid days")
+		}
+	})
+
+	t.Run("InitialRunAndTicker", func(t *testing.T) {
+		mock := &mockStore{}
+		collector := NewCollector(mock, 10)
+
+		// Short interval for testing
+		interval := 10 * time.Millisecond
+		collector.StartPurger(30, interval)
+
+		// Wait for initial run + at least one ticker run
+		time.Sleep(50 * time.Millisecond)
+
+		if atomic.LoadInt32(&mock.purgeCount) < 2 {
+			t.Errorf("Expected at least 2 purge calls (initial + ticker), got %d", atomic.LoadInt32(&mock.purgeCount))
+		}
+
+		_ = collector.Close()
+	})
+
+	t.Run("PurgeError", func(t *testing.T) {
+		// This test mainly ensures it doesn't crash on error (logged internally)
+		mock := &mockStore{
+			purgeErr: errors.New("purge error"),
+		}
+		collector := NewCollector(mock, 10)
+
+		interval := 10 * time.Millisecond
+		collector.StartPurger(30, interval)
+
+		time.Sleep(50 * time.Millisecond)
+
+		if atomic.LoadInt32(&mock.purgeCount) < 2 {
+			t.Errorf("Expected at least 2 purge attempts, got %d", atomic.LoadInt32(&mock.purgeCount))
+		}
+
+		_ = collector.Close()
+	})
 }
