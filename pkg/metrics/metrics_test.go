@@ -1,10 +1,49 @@
 package metrics
 
 import (
+	"errors"
 	"os"
+	"sync/atomic"
 	"testing"
 	"time"
 )
+
+// mockStore implements Store for testing error paths
+type mockStore struct {
+	saveErr       error
+	statsErr      error
+	saveCount     int32
+	closed        bool
+	statsToReturn *GlobalStats
+}
+
+func (m *mockStore) SaveRequest(record RequestRecord) error {
+	return m.SaveRequests([]RequestRecord{record})
+}
+
+func (m *mockStore) SaveRequests(records []RequestRecord) error {
+	atomic.AddInt32(&m.saveCount, int32(len(records)))
+	return m.saveErr
+}
+
+func (m *mockStore) GetGlobalStats() (*GlobalStats, error) {
+	if m.statsErr != nil {
+		return nil, m.statsErr
+	}
+	if m.statsToReturn != nil {
+		return m.statsToReturn, nil
+	}
+	return &GlobalStats{}, nil
+}
+
+func (m *mockStore) Close() error {
+	m.closed = true
+	return nil
+}
+
+func (m *mockStore) PurgeOldMetrics(_ int) error {
+	return nil
+}
 
 func TestStore_SaveAndRetrieve(t *testing.T) {
 	// Use temporary database
@@ -99,6 +138,39 @@ func TestStore_SaveAndRetrieve(t *testing.T) {
 	}
 }
 
+func TestStore_SaveRequests(t *testing.T) {
+	// Use temporary database
+	tmpFile, err := os.CreateTemp("", "metrics_batch_test_*.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpPath := tmpFile.Name()
+	_ = tmpFile.Close()
+	defer func() { _ = os.Remove(tmpPath) }()
+
+	store, err := NewStore(tmpPath)
+	if err != nil {
+		t.Fatalf("Failed to create store: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	// Batch of records
+	records := []RequestRecord{
+		{Provider: "BatchP", Model: "m1", StatusCode: 200, ResponseTime: 100, Success: true, CreatedAt: time.Now()},
+		{Provider: "BatchP", Model: "m2", StatusCode: 200, ResponseTime: 110, Success: true, CreatedAt: time.Now()},
+		{Provider: "BatchP", Model: "m3", StatusCode: 200, ResponseTime: 120, Success: true, CreatedAt: time.Now()},
+	}
+
+	if err := store.SaveRequests(records); err != nil {
+		t.Fatalf("Failed to save batch: %v", err)
+	}
+
+	stats, _ := store.GetGlobalStats()
+	if stats.TotalRequests != 3 {
+		t.Errorf("Expected 3 requests, got %d", stats.TotalRequests)
+	}
+}
+
 func TestCollector_AsyncRecording(t *testing.T) {
 	tmpFile, err := os.CreateTemp("", "metrics_collector_test_*.db")
 	if err != nil {
@@ -121,7 +193,7 @@ func TestCollector_AsyncRecording(t *testing.T) {
 	collector.Record("TestProvider", "test-model", 500, 30*time.Millisecond, false, "server_error")
 
 	// Give async worker time to process
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(200 * time.Millisecond)
 
 	stats, err := collector.GetStats()
 	if err != nil {
@@ -182,7 +254,7 @@ func TestCollector_DefaultBufferSize(t *testing.T) {
 
 	// Should work without panic
 	collector.Record("TestProvider", "test-model", 200, 100*time.Millisecond, true, "")
-	time.Sleep(50 * time.Millisecond)
+	time.Sleep(200 * time.Millisecond)
 
 	_ = collector.Close()
 }
@@ -206,7 +278,7 @@ func TestCollector_NegativeBufferSize(t *testing.T) {
 
 	// Should work without panic
 	collector.Record("TestProvider", "test-model", 200, 100*time.Millisecond, true, "")
-	time.Sleep(50 * time.Millisecond)
+	time.Sleep(200 * time.Millisecond)
 
 	_ = collector.Close()
 }
@@ -336,5 +408,90 @@ func TestStore_ErrorCodes(t *testing.T) {
 	}
 	if ps.Error400Count != 3 {
 		t.Errorf("Expected 3 4xx errors (excluding 429), got %d", ps.Error400Count)
+	}
+}
+
+func TestCollector_WorkerHandlesSaveError(t *testing.T) {
+	mock := &mockStore{
+		saveErr: errors.New("database error"),
+	}
+
+	collector := NewCollector(mock, 10)
+
+	// Record should still work, but save will fail (logged, not panic)
+	collector.Record("TestProvider", "model", 200, 100*time.Millisecond, true, "")
+
+	// Wait for worker to process
+	time.Sleep(100 * time.Millisecond)
+
+	// Verify save was attempted
+	if atomic.LoadInt32(&mock.saveCount) < 1 {
+		t.Error("Expected at least 1 save attempt")
+	}
+
+	_ = collector.Close()
+}
+
+func TestCollector_DrainHandlesSaveError(t *testing.T) {
+	mock := &mockStore{
+		saveErr: errors.New("database error on shutdown"),
+	}
+
+	collector := NewCollector(mock, 10)
+
+	// Queue multiple records
+	for i := 0; i < 5; i++ {
+		collector.Record("TestProvider", "model", 200, 100*time.Millisecond, true, "")
+	}
+
+	// Close immediately to trigger drain
+	_ = collector.Close()
+
+	// Give time for drain to complete
+	time.Sleep(100 * time.Millisecond)
+
+	// Verify all saves were attempted despite errors
+	if atomic.LoadInt32(&mock.saveCount) < 5 {
+		t.Errorf("Expected at least 5 save attempts, got %d", atomic.LoadInt32(&mock.saveCount))
+	}
+
+	if !mock.closed {
+		t.Error("Expected store to be closed")
+	}
+}
+
+func TestCollector_GetStatsError(t *testing.T) {
+	mock := &mockStore{
+		statsErr: errors.New("stats error"),
+	}
+
+	collector := NewCollector(mock, 10)
+	defer func() { _ = collector.Close() }()
+
+	_, err := collector.GetStats()
+	if err == nil {
+		t.Error("Expected error from GetStats")
+	}
+}
+
+func TestCollector_WithMockStore(t *testing.T) {
+	mock := &mockStore{
+		statsToReturn: &GlobalStats{
+			TotalRequests: 42,
+			TotalSuccess:  40,
+			TotalFailures: 2,
+		},
+	}
+
+	collector := NewCollector(mock, 10)
+	defer func() { _ = collector.Close() }()
+
+	stats, err := collector.GetStats()
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	if stats.TotalRequests != 42 {
+		t.Errorf("Expected 42 requests, got %d", stats.TotalRequests)
 	}
 }

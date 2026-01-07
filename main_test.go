@@ -13,18 +13,19 @@ import (
 	"github.com/jmanzanog/InfiniteLLMFreeTier/pkg/api"
 	"github.com/jmanzanog/InfiniteLLMFreeTier/pkg/balancer"
 	"github.com/jmanzanog/InfiniteLLMFreeTier/pkg/provider"
+	"github.com/jmanzanog/InfiniteLLMFreeTier/pkg/server"
 )
 
 // --- Mocks to force unreachable errors ---
 
 type errorReader struct{}
 
-func (e *errorReader) Read(p []byte) (n int, err error) { return 0, errors.New("io error total") }
+func (e *errorReader) Read(_ []byte) (n int, err error) { return 0, errors.New("io error total") }
 func (e *errorReader) Close() error                     { return nil }
 
 type failResponse struct{}
 
-func (f failResponse) VisitCreateChatCompletionResponse(w http.ResponseWriter) error {
+func (f failResponse) VisitCreateChatCompletionResponse(_ http.ResponseWriter) error {
 	return errors.New("visit failure")
 }
 
@@ -34,7 +35,7 @@ type mockStrictServer struct {
 	err  error
 }
 
-func (m *mockStrictServer) CreateChatCompletion(ctx context.Context, request api.CreateChatCompletionRequestObject) (api.CreateChatCompletionResponseObject, error) {
+func (m *mockStrictServer) CreateChatCompletion(_ context.Context, _ api.CreateChatCompletionRequestObject) (api.CreateChatCompletionResponseObject, error) {
 	if m.err != nil {
 		return nil, m.err
 	}
@@ -85,7 +86,7 @@ func TestGeneratedCode_ExtremeConditions(t *testing.T) {
 		// Use a real provider to avoid panic
 		p := provider.NewCustomProvider("T", "http://l", "k", "test-model")
 		lb := balancer.NewBalancer([]provider.Provider{p})
-		h := api.NewStrictHandler(NewServer(lb), []api.StrictMiddlewareFunc{mw})
+		h := api.NewStrictHandler(server.NewServer(lb), []api.StrictMiddlewareFunc{mw})
 
 		req := httptest.NewRequest("POST", "/chat", bytes.NewBufferString(`{"model":"test"}`))
 		w := httptest.NewRecorder()
@@ -108,8 +109,8 @@ func TestGateway_E2E(t *testing.T) {
 	r := chi.NewRouter()
 	p := provider.NewCustomProvider("Test", mockUpstream.URL, "key", "test-model")
 	lb := balancer.NewBalancer([]provider.Provider{p})
-	server := NewServer(lb)
-	strictHandler := api.NewStrictHandler(server, nil)
+	srv := server.NewServer(lb)
+	strictHandler := api.NewStrictHandler(srv, nil)
 	api.HandlerWithOptions(strictHandler, api.ChiServerOptions{
 		BaseRouter: r,
 		BaseURL:    "/v1",
@@ -224,8 +225,8 @@ func TestHealthEndpoint_Integration(t *testing.T) {
 	// Mount OpenAI handler
 	p := provider.NewCustomProvider("Test", mockUpstream.URL, "key", "test-model")
 	lb := balancer.NewBalancer([]provider.Provider{p})
-	server := NewServer(lb)
-	strictHandler := api.NewStrictHandler(server, nil)
+	srv := server.NewServer(lb)
+	strictHandler := api.NewStrictHandler(srv, nil)
 	api.HandlerWithOptions(strictHandler, api.ChiServerOptions{
 		BaseRouter: r,
 		BaseURL:    "/v1",

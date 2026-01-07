@@ -3,7 +3,6 @@ package metrics
 import (
 	"database/sql"
 	"fmt"
-	"sync"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -51,20 +50,30 @@ type GlobalStats struct {
 	GeneratedAt        string          `json:"generated_at"`
 }
 
-// Store handles SQLite persistence for metrics
-type Store struct {
-	db *sql.DB
-	mu sync.RWMutex
+// Store defines the interface for metrics storage
+type Store interface {
+	SaveRequest(record RequestRecord) error
+	SaveRequests(records []RequestRecord) error
+	GetGlobalStats() (*GlobalStats, error)
+	PurgeOldMetrics(days int) error
+	Close() error
 }
 
-// NewStore creates a new SQLite store
-func NewStore(dbPath string) (*Store, error) {
-	db, err := sql.Open("sqlite", dbPath)
+// sqliteStore handles SQLite persistence for metrics
+type sqliteStore struct {
+	db *sql.DB
+}
+
+// NewStore creates a new SQLite store and returns it as a Store interface
+func NewStore(dbPath string) (Store, error) {
+	// Enable WAL mode and busy timeout for better concurrency
+	dsn := fmt.Sprintf("%s?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)", dbPath)
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 
-	store := &Store{db: db}
+	store := &sqliteStore{db: db}
 	if err := store.migrate(); err != nil {
 		return nil, fmt.Errorf("failed to migrate database: %w", err)
 	}
@@ -73,7 +82,7 @@ func NewStore(dbPath string) (*Store, error) {
 }
 
 // migrate creates the necessary tables
-func (s *Store) migrate() error {
+func (s *sqliteStore) migrate() error {
 	query := `
 	CREATE TABLE IF NOT EXISTS requests (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -94,32 +103,52 @@ func (s *Store) migrate() error {
 	return err
 }
 
-// SaveRequest persists a request record
-func (s *Store) SaveRequest(record RequestRecord) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+// SaveRequest persists a single request record
+func (s *sqliteStore) SaveRequest(record RequestRecord) error {
+	return s.SaveRequests([]RequestRecord{record})
+}
 
-	query := `
-	INSERT INTO requests (provider, model, status_code, response_time_ms, success, error_type, created_at)
-	VALUES (?, ?, ?, ?, ?, ?, ?)
-	`
-	_, err := s.db.Exec(query,
-		record.Provider,
-		record.Model,
-		record.StatusCode,
-		record.ResponseTime,
-		record.Success,
-		record.ErrorType,
-		record.CreatedAt,
-	)
-	return err
+// SaveRequests persists multiple request records in a single transaction
+func (s *sqliteStore) SaveRequests(records []RequestRecord) error {
+	if len(records) == 0 {
+		return nil
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	stmt, err := tx.Prepare(`
+		INSERT INTO requests (provider, model, status_code, response_time_ms, success, error_type, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to prepare statement: %w", err)
+	}
+	defer func() { _ = stmt.Close() }()
+
+	for _, record := range records {
+		_, err := stmt.Exec(
+			record.Provider,
+			record.Model,
+			record.StatusCode,
+			record.ResponseTime,
+			record.Success,
+			record.ErrorType,
+			record.CreatedAt,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to execute statement: %w", err)
+		}
+	}
+
+	return tx.Commit()
 }
 
 // GetGlobalStats returns aggregated statistics
-func (s *Store) GetGlobalStats() (*GlobalStats, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
+func (s *sqliteStore) GetGlobalStats() (*GlobalStats, error) {
 	stats := &GlobalStats{
 		GeneratedAt: time.Now().UTC().Format(time.RFC3339),
 	}
@@ -212,7 +241,17 @@ func (s *Store) GetGlobalStats() (*GlobalStats, error) {
 	return stats, nil
 }
 
+// PurgeOldMetrics deletes metric records older than the specified number of days
+func (s *sqliteStore) PurgeOldMetrics(days int) error {
+	if days <= 0 {
+		return nil
+	}
+	query := `DELETE FROM requests WHERE created_at < datetime('now', '-' || ? || ' days')`
+	_, err := s.db.Exec(query, days)
+	return err
+}
+
 // Close closes the database connection
-func (s *Store) Close() error {
+func (s *sqliteStore) Close() error {
 	return s.db.Close()
 }

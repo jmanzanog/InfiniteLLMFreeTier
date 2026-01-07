@@ -27,6 +27,7 @@ The project follows a clean, modular architecture inspired by Domain-Driven Desi
 - **`/api`**: Contains the OpenAPI specifications. `openai_proxy.yml` is the optimized version for generating Go types.
 - **`/pkg/api`**: Auto-generated Boilderplate (Routing, JSON Decoding/Encoding). **Do not edit manually**.
 - **`/pkg/balancer`**: Core logic for provider selection, round-robin state, and retry policies.
+- **`/pkg/handlers`**: HTTP handlers for health, JSON stats, and the web dashboard using Go's `embed` and `html/template`.
 - **`/pkg/metrics`**: Async metrics collection with SQLite persistence for request statistics.
 - **`/pkg/provider`**: Implementation of various LLM adapters (Groq, Mistral, Gemini, etc.).
 - **`main.go`**: Implements the `StrictServerInterface`, orchestrates the bootstrap process, and handles the Reverse Proxy logic.
@@ -56,6 +57,7 @@ FIXED_PROVIDER=Gemini          # Force routing to a specific provider
 
 # Metrics (optional)
 METRICS_DB_PATH=metrics.db     # SQLite database path for metrics persistence
+METRICS_RETENTION_DAYS=30      # How many days to keep metrics (default: 30)
 ```
 
 ### Running the Gateway
@@ -79,19 +81,28 @@ curl http://localhost:8080/health
 # Returns: {"status":"ok"}
 ```
 
-### Stats Endpoint
+### Stats & Dashboard
 
-A `/stats` endpoint provides aggregated metrics per provider:
+The gateway provides both raw JSON metrics and a visual dashboard:
+
+#### 1. Visual Dashboard (HTML)
+Access a premium, real-time dashboard at `http://localhost:8080/stats/web`.
+
+- **Auto-Refresh**: Use the `refresh` query parameter (e.g., `/stats/web?refresh=5`) to automatically reload the dashboard every N seconds.
+- **Rich UI**: Embedded templates provide high-performance, frame-free visualization of your gateway's health.
+
+#### 2. JSON Metrics
+A `/stats` endpoint provides aggregated metrics for programmatic access:
 
 ```bash
 curl http://localhost:8080/stats
 ```
 
 Returns statistics including:
-- **Total requests**, successes, and failures
-- **Average, min, max response times** (in milliseconds)
-- **Per-provider breakdown** with error counts (429, 5xx, 4xx)
-- **Success rate** percentage
+- **Total requests**, successes, and failures.
+- **Average, min, max response times** (in milliseconds).
+- **Per-provider breakdown** with error counts (429, 5xx, 4xx).
+- **Success rate** percentage and "Stats Since" timestamp.
 
 ### Response Headers
 

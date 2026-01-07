@@ -3,9 +3,11 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -13,8 +15,10 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jmanzanog/InfiniteLLMFreeTier/pkg/api"
 	"github.com/jmanzanog/InfiniteLLMFreeTier/pkg/balancer"
+	"github.com/jmanzanog/InfiniteLLMFreeTier/pkg/handlers"
 	"github.com/jmanzanog/InfiniteLLMFreeTier/pkg/metrics"
 	"github.com/jmanzanog/InfiniteLLMFreeTier/pkg/provider"
+	"github.com/jmanzanog/InfiniteLLMFreeTier/pkg/server"
 )
 
 // E2E tests simulate production-like behavior with real SQLite, real collector,
@@ -37,38 +41,24 @@ func setupE2EServer(t *testing.T, providers []provider.Provider) (*httptest.Serv
 		t.Fatalf("Failed to create metrics store: %v", err)
 	}
 
-	// Initialize real collector with small buffer for testing
-	collector := metrics.NewCollector(store, 100)
+	// Initialize real collector with larger buffer for E2E
+	collector := metrics.NewCollector(store, 1000)
 
 	// Initialize real balancer with metrics
 	lb := balancer.NewBalancerWithMetrics(providers, collector)
-	server := NewServer(lb)
+	srv := server.NewServer(lb)
 
 	// Create real chi router
 	r := chi.NewRouter()
 
-	// Real health endpoint
-	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"status":"ok"}`))
-	})
-
-	// Real stats endpoint
-	r.Get("/stats", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		stats, err := collector.GetStats()
-		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			_, _ = w.Write([]byte(`{"error":"failed to retrieve stats"}`))
-			return
-		}
-		w.WriteHeader(http.StatusOK)
-		_ = json.NewEncoder(w).Encode(stats)
-	})
+	// Use handlers package (same as production)
+	r.Get("/health", handlers.Health)
+	statsHandler := handlers.NewStatsHandler(collector)
+	r.Get("/stats", statsHandler.JSON)
+	r.Get("/stats/web", statsHandler.Web)
 
 	// Mount OpenAI-compatible handler
-	strictHandler := api.NewStrictHandler(server, nil)
+	strictHandler := api.NewStrictHandler(srv, nil)
 	api.HandlerWithOptions(strictHandler, api.ChiServerOptions{
 		BaseRouter: r,
 		BaseURL:    "/v1",
@@ -195,6 +185,69 @@ func TestE2E_FullFlow(t *testing.T) {
 		// Verify avg response time is reasonable (> 50ms due to mock delay)
 		if stats.AvgResponseMs < 50 {
 			t.Errorf("Expected avg response time >= 50ms, got %.2f", stats.AvgResponseMs)
+		}
+	})
+
+	t.Run("Stats_Web_Dashboard", func(t *testing.T) {
+		resp, err := http.Get(ts.URL + "/stats/web")
+		if err != nil {
+			t.Fatalf("Stats web request failed: %v", err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("Expected 200, got %d", resp.StatusCode)
+		}
+
+		// Verify Content-Type is HTML
+		contentType := resp.Header.Get("Content-Type")
+		if !strings.Contains(contentType, "text/html") {
+			t.Errorf("Expected Content-Type 'text/html', got '%s'", contentType)
+		}
+
+		// Read full body
+		bodyBytes, err := io.ReadAll(resp.Body)
+		if err != nil {
+			t.Fatalf("Failed to read body: %v", err)
+		}
+		bodyStr := string(bodyBytes)
+
+		// Check for dashboard title
+		if !strings.Contains(bodyStr, "InfiniteLLM Gateway") {
+			t.Error("Expected 'InfiniteLLM Gateway' in dashboard HTML")
+		}
+
+		// Check for stats elements
+		if !strings.Contains(bodyStr, "Total Requests") {
+			t.Error("Expected 'Total Requests' in dashboard HTML")
+		}
+	})
+
+	t.Run("Stats_Web_With_Refresh", func(t *testing.T) {
+		resp, err := http.Get(ts.URL + "/stats/web?refresh=5")
+		if err != nil {
+			t.Fatalf("Stats web request failed: %v", err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("Expected 200, got %d", resp.StatusCode)
+		}
+
+		bodyBytes, err := io.ReadAll(resp.Body)
+		if err != nil {
+			t.Fatalf("Failed to read body: %v", err)
+		}
+		bodyStr := string(bodyBytes)
+
+		// Check for refresh meta tag
+		if !strings.Contains(bodyStr, `content="5"`) {
+			t.Error("Expected refresh meta tag with content='5'")
+		}
+
+		// Check for refresh badge
+		if !strings.Contains(bodyStr, "Auto-refresh") {
+			t.Error("Expected 'Auto-refresh' badge in HTML")
 		}
 	})
 }
@@ -500,8 +553,8 @@ func TestE2E_ConcurrentRequests(t *testing.T) {
 		<-done
 	}
 
-	// Wait for async metrics
-	time.Sleep(500 * time.Millisecond)
+	// Wait for async metrics (SQLite writes are sequential, need time for 50 requests)
+	time.Sleep(1 * time.Second)
 
 	resp, _ := http.Get(ts.URL + "/stats")
 	defer func() { _ = resp.Body.Close() }()
