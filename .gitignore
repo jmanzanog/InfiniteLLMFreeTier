@@ -37,3 +37,7 @@ Thumbs.db
 *.txt
 /qodana.yaml
 /coverage
+
+# SQLite databases (runtime metrics)
+*.db
+metrics.db

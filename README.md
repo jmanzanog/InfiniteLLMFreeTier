@@ -27,6 +27,7 @@ The project follows a clean, modular architecture inspired by Domain-Driven Desi
 - **`/api`**: Contains the OpenAPI specifications. `openai_proxy.yml` is the optimized version for generating Go types.
 - **`/pkg/api`**: Auto-generated Boilderplate (Routing, JSON Decoding/Encoding). **Do not edit manually**.
 - **`/pkg/balancer`**: Core logic for provider selection, round-robin state, and retry policies.
+- **`/pkg/metrics`**: Async metrics collection with SQLite persistence for request statistics.
 - **`/pkg/provider`**: Implementation of various LLM adapters (Groq, Mistral, Gemini, etc.).
 - **`main.go`**: Implements the `StrictServerInterface`, orchestrates the bootstrap process, and handles the Reverse Proxy logic.
 
@@ -52,6 +53,9 @@ GEMINI_API_KEY=your_key
 # Optional Debug Flags
 LOG_LLM_RESPONSE_DETAILS=true  # Log full upstream response body
 FIXED_PROVIDER=Gemini          # Force routing to a specific provider
+
+# Metrics (optional)
+METRICS_DB_PATH=metrics.db     # SQLite database path for metrics persistence
 ```
 
 ### Running the Gateway
@@ -74,6 +78,26 @@ A `/health` endpoint is available for Kubernetes liveness/readiness probes:
 curl http://localhost:8080/health
 # Returns: {"status":"ok"}
 ```
+
+### Stats Endpoint
+
+A `/stats` endpoint provides aggregated metrics per provider:
+
+```bash
+curl http://localhost:8080/stats
+```
+
+Returns statistics including:
+- **Total requests**, successes, and failures
+- **Average, min, max response times** (in milliseconds)
+- **Per-provider breakdown** with error counts (429, 5xx, 4xx)
+- **Success rate** percentage
+
+### Response Headers
+
+Every response from `/v1/chat/completions` includes:
+- `X-Provider`: Name of the LLM provider that handled the request
+- `X-Response-Time-Ms`: Response time in milliseconds
 
 ## 🐳 Docker
 
