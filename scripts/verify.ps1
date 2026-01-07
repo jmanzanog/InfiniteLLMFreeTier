@@ -2,6 +2,7 @@
 
 Write-Host "--- Running go mod tidy ---" -ForegroundColor Cyan
 go mod tidy
+if ($LASTEXITCODE -ne 0) { exit 1 }
 
 Write-Host "--- Running go fmt ---" -ForegroundColor Cyan
 $fmtFiles = gofmt -s -l .
