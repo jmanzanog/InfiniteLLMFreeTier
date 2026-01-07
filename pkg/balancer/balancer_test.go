@@ -21,7 +21,7 @@ type mockProvider struct {
 }
 
 func (m *mockProvider) Name() string { return m.name }
-func (m *mockProvider) Chat(ctx context.Context, req *api.CreateChatCompletionRequest) (*http.Response, error) {
+func (m *mockProvider) Chat(_ context.Context, _ *api.CreateChatCompletionRequest) (*http.Response, error) {
 	if m.fail != nil {
 		return nil, m.fail
 	}
@@ -201,7 +201,7 @@ func TestBalancer_WithMetrics(t *testing.T) {
 		}
 
 		// Wait for async metrics
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(200 * time.Millisecond)
 
 		stats, err := collector.GetStats()
 		if err != nil {
@@ -219,7 +219,7 @@ func TestBalancer_WithMetrics(t *testing.T) {
 
 		_, _ = lb.ChatWithResult(context.Background(), &api.CreateChatCompletionRequest{Model: "test"})
 
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(200 * time.Millisecond)
 
 		stats, _ := collector.GetStats()
 		// Should have recorded both the failure and success
@@ -235,7 +235,7 @@ func TestBalancer_WithMetrics(t *testing.T) {
 
 		_, _ = lb.ChatWithResult(context.Background(), &api.CreateChatCompletionRequest{Model: "test"})
 
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(200 * time.Millisecond)
 		// Metrics should have been recorded for both
 	})
 }

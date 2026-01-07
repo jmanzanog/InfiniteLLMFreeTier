@@ -2,18 +2,25 @@ package metrics
 
 import (
 	"log/slog"
+	"sync"
 	"time"
+)
+
+const (
+	batchSize    = 50
+	batchTimeout = 100 * time.Millisecond
 )
 
 // Collector handles async metric collection without impacting response times
 type Collector struct {
-	store    *Store
+	store    Store
 	recordCh chan RequestRecord
 	done     chan struct{}
+	wg       sync.WaitGroup
 }
 
 // NewCollector creates a new metrics collector with buffered channel
-func NewCollector(store *Store, bufferSize int) *Collector {
+func NewCollector(store Store, bufferSize int) *Collector {
 	if bufferSize <= 0 {
 		bufferSize = 1000
 	}
@@ -22,27 +29,78 @@ func NewCollector(store *Store, bufferSize int) *Collector {
 		recordCh: make(chan RequestRecord, bufferSize),
 		done:     make(chan struct{}),
 	}
+	c.wg.Add(1)
 	go c.worker()
 	return c
 }
 
-// worker processes records asynchronously
+// StartPurger begins a background goroutine that periodically deletes old metrics
+func (c *Collector) StartPurger(days int, interval time.Duration) {
+	if days <= 0 {
+		return
+	}
+	c.wg.Add(1)
+	go func() {
+		defer c.wg.Done()
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+
+		// Run once at start
+		if err := c.store.PurgeOldMetrics(days); err != nil {
+			slog.Error("Failed to purge old metrics", "error", err)
+		}
+
+		for {
+			select {
+			case <-ticker.C:
+				if err := c.store.PurgeOldMetrics(days); err != nil {
+					slog.Error("Failed to purge old metrics", "error", err)
+				}
+			case <-c.done:
+				return
+			}
+		}
+	}()
+}
+
+// worker processes records asynchronously using batching
 func (c *Collector) worker() {
+	defer c.wg.Done()
+
+	var batch []RequestRecord
+	ticker := time.NewTicker(batchTimeout)
+	defer ticker.Stop()
+
+	flush := func() {
+		if len(batch) == 0 {
+			return
+		}
+		if err := c.store.SaveRequests(batch); err != nil {
+			slog.Error("Failed to save metrics batch", "error", err, "count", len(batch))
+		}
+		batch = batch[:0]
+	}
+
 	for {
 		select {
 		case record := <-c.recordCh:
-			if err := c.store.SaveRequest(record); err != nil {
-				slog.Error("Failed to save metrics", "error", err, "provider", record.Provider)
+			batch = append(batch, record)
+			if len(batch) >= batchSize {
+				flush()
 			}
+		case <-ticker.C:
+			flush()
 		case <-c.done:
 			// Drain remaining records before closing
 			for {
 				select {
 				case record := <-c.recordCh:
-					if err := c.store.SaveRequest(record); err != nil {
-						slog.Error("Failed to save metrics on shutdown", "error", err)
+					batch = append(batch, record)
+					if len(batch) >= batchSize {
+						flush()
 					}
 				default:
+					flush()
 					return
 				}
 			}
@@ -79,5 +137,6 @@ func (c *Collector) GetStats() (*GlobalStats, error) {
 // Close gracefully shuts down the collector
 func (c *Collector) Close() error {
 	close(c.done)
+	c.wg.Wait() // Wait for all workers to finish
 	return c.store.Close()
 }
