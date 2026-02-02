@@ -3,11 +3,13 @@ package handlers
 import (
 	"encoding/json"
 	"errors"
+	"html/template"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/jmanzanog/InfiniteLLMFreeTier/pkg/metrics"
@@ -523,5 +525,46 @@ func TestStatsHandler_Web_SuccessClass(t *testing.T) {
 	// Should have "success" class for failures card when failures = 0
 	if !strings.Contains(body, "badge-success") {
 		t.Error("Expected 'badge-success' class for provider with >= 95% success rate")
+	}
+}
+
+func TestParseDashboardTemplate_Error(t *testing.T) {
+	_, err := parseDashboardTemplate(fstest.MapFS{})
+	if err == nil {
+		t.Fatal("expected error for missing template")
+	}
+}
+
+func TestMustParseDashboardTemplate_Panic(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatal("expected panic")
+		}
+	}()
+
+	_ = mustParseDashboardTemplate(fstest.MapFS{})
+}
+
+func TestStatsHandler_Web_TemplateExecuteError(t *testing.T) {
+	oldTemplate := dashboardTemplate
+	badTemplate := template.Must(template.New("bad").Funcs(template.FuncMap{
+		"fail": func() (string, error) { return "", errors.New("fail") },
+	}).Parse("{{fail}}"))
+	dashboardTemplate = badTemplate
+	t.Cleanup(func() { dashboardTemplate = oldTemplate })
+
+	stats := &metrics.GlobalStats{TotalRequests: 1}
+	handler := NewStatsHandlerWithProvider(&mockStatsProvider{stats: stats})
+
+	req := httptest.NewRequest(http.MethodGet, "/stats/web", nil)
+	w := httptest.NewRecorder()
+
+	handler.Web(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "Failed to render dashboard") {
+		t.Fatal("expected render error message")
 	}
 }

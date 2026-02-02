@@ -10,6 +10,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+var openConfigFile = os.Open
+
 type AppConfig struct {
 	Providers struct {
 		Groq struct {
@@ -31,7 +33,7 @@ type AppConfig struct {
 }
 
 func LoadConfigFile() (*AppConfig, error) {
-	f, err := os.Open("config.yaml")
+	f, err := openConfigFile("config.yaml")
 	if err != nil {
 		if os.IsNotExist(err) {
 			return &AppConfig{}, nil

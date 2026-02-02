@@ -176,6 +176,10 @@ type ChiServerOptions struct {
 	ErrorHandlerFunc func(w http.ResponseWriter, r *http.Request, err error)
 }
 
+var defaultErrorHandlerFunc = func(w http.ResponseWriter, r *http.Request, err error) {
+	http.Error(w, err.Error(), http.StatusBadRequest)
+}
+
 // HandlerFromMux creates http.Handler with routing matching OpenAPI spec based on the provided mux.
 func HandlerFromMux(si ServerInterface, r chi.Router) http.Handler {
 	return HandlerWithOptions(si, ChiServerOptions{
@@ -198,9 +202,7 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r = chi.NewRouter()
 	}
 	if options.ErrorHandlerFunc == nil {
-		options.ErrorHandlerFunc = func(w http.ResponseWriter, r *http.Request, err error) {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-		}
+		options.ErrorHandlerFunc = defaultErrorHandlerFunc
 	}
 	wrapper := ServerInterfaceWrapper{
 		Handler:            si,

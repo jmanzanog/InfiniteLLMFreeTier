@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"html/template"
+	"io/fs"
 	"net/http"
 
 	"github.com/jmanzanog/InfiniteLLMFreeTier/pkg/metrics"
@@ -17,11 +18,19 @@ var templateFS embed.FS
 var dashboardTemplate *template.Template
 
 func init() {
-	var err error
-	dashboardTemplate, err = template.ParseFS(templateFS, "templates/dashboard.html")
+	dashboardTemplate = mustParseDashboardTemplate(templateFS)
+}
+
+func parseDashboardTemplate(fsys fs.FS) (*template.Template, error) {
+	return template.ParseFS(fsys, "templates/dashboard.html")
+}
+
+func mustParseDashboardTemplate(fsys fs.FS) *template.Template {
+	tmpl, err := parseDashboardTemplate(fsys)
 	if err != nil {
 		panic("failed to parse dashboard template: " + err.Error())
 	}
+	return tmpl
 }
 
 // StatsProvider abstracts stats retrieval for testing

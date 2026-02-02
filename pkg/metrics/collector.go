@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-const (
+var (
 	batchSize    = 50
 	batchTimeout = 100 * time.Millisecond
 )
@@ -92,18 +92,23 @@ func (c *Collector) worker() {
 			flush()
 		case <-c.done:
 			// Drain remaining records before closing
-			for {
-				select {
-				case record := <-c.recordCh:
-					batch = append(batch, record)
-					if len(batch) >= batchSize {
-						flush()
-					}
-				default:
-					flush()
-					return
-				}
+			c.drain(&batch, flush)
+			return
+		}
+	}
+}
+
+func (c *Collector) drain(batch *[]RequestRecord, flush func()) {
+	for {
+		select {
+		case record := <-c.recordCh:
+			*batch = append(*batch, record)
+			if len(*batch) >= batchSize {
+				flush()
 			}
+		default:
+			flush()
+			return
 		}
 	}
 }

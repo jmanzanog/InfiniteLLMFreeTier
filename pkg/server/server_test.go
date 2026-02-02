@@ -167,3 +167,86 @@ func TestProxyResponse_BodyReadError(t *testing.T) {
 		t.Error("Expected error reading broken body")
 	}
 }
+
+type errorBodyProvider struct {
+	name string
+}
+
+func (p *errorBodyProvider) Name() string { return p.name }
+
+func (p *errorBodyProvider) Chat(_ context.Context, _ *api.CreateChatCompletionRequest) (*http.Response, error) {
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       &errorReader{},
+		Header:     make(http.Header),
+	}, nil
+}
+
+type plainRecorder struct {
+	headers http.Header
+	code    int
+	body    bytes.Buffer
+}
+
+func (p *plainRecorder) Header() http.Header {
+	if p.headers == nil {
+		p.headers = make(http.Header)
+	}
+	return p.headers
+}
+
+func (p *plainRecorder) Write(b []byte) (int, error) {
+	if p.code == 0 {
+		p.code = http.StatusOK
+	}
+	return p.body.Write(b)
+}
+
+func (p *plainRecorder) WriteHeader(statusCode int) {
+	p.code = statusCode
+}
+
+func TestServer_LoggingErrorReadingBody(t *testing.T) {
+	_ = os.Setenv("LOG_LLM_RESPONSE_DETAILS", "true")
+	t.Cleanup(func() { _ = os.Unsetenv("LOG_LLM_RESPONSE_DETAILS") })
+
+	lb := balancer.NewBalancer([]provider.Provider{&errorBodyProvider{name: "Err"}})
+	srv := NewServer(lb)
+
+	req := api.CreateChatCompletionRequestObject{
+		Body: &api.CreateChatCompletionJSONRequestBody{Model: "m"},
+	}
+	resp, err := srv.CreateChatCompletion(context.Background(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	if err := resp.VisitCreateChatCompletionResponse(w); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestProxyResponse_NonFlusher(t *testing.T) {
+	resp := &http.Response{
+		StatusCode: 201,
+		Header:     make(http.Header),
+		Body:       io.NopCloser(bytes.NewBufferString("ok")),
+	}
+	resp.Header.Set("X-Test", "v")
+	r := &ProxyResponse{resp: resp, providerName: "P", responseTime: 10}
+
+	w := &plainRecorder{}
+	if err := r.VisitCreateChatCompletionResponse(w); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if w.code != 201 {
+		t.Fatalf("expected status 201, got %d", w.code)
+	}
+	if w.Header().Get("X-Provider") != "P" {
+		t.Fatalf("expected X-Provider header")
+	}
+	if w.Header().Get("X-Test") != "v" {
+		t.Fatalf("expected X-Test header")
+	}
+}
