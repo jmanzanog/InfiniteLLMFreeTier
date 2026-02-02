@@ -3,6 +3,7 @@ module github.com/jmanzanog/InfiniteLLMFreeTier
 go 1.25.5
 
 require (
+	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/go-chi/chi/v5 v5.2.4
 	github.com/joho/godotenv v1.5.1
 	github.com/oapi-codegen/runtime v1.1.2

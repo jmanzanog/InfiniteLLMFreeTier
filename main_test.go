@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -259,4 +260,166 @@ func TestHealthEndpoint_Integration(t *testing.T) {
 			t.Errorf("API: Expected 200, got %d", apiResp.StatusCode)
 		}
 	})
+}
+
+func TestRun_NoProviders(t *testing.T) {
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpDir := tempDir(t)
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(wd) })
+
+	_ = os.Unsetenv("GROQ_API_KEY")
+	_ = os.Unsetenv("CEREBRAS_API_KEY")
+	_ = os.Unsetenv("OPENROUTER_API_KEY")
+	_ = os.Unsetenv("MISTRAL_API_KEY")
+	_ = os.Unsetenv("GEMINI_API_KEY")
+	_ = os.Unsetenv("FIXED_PROVIDER")
+
+	if err := run(); err == nil {
+		t.Fatal("expected error with no providers")
+	}
+}
+
+func TestRun_MetricsStoreError(t *testing.T) {
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpDir := tempDir(t)
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(wd) })
+
+	_ = os.Setenv("GROQ_API_KEY", "test")
+	_ = os.Setenv("METRICS_DB_PATH", filepath.Join(tmpDir, "missing", "metrics.db"))
+	t.Cleanup(func() {
+		_ = os.Unsetenv("GROQ_API_KEY")
+		_ = os.Unsetenv("METRICS_DB_PATH")
+	})
+
+	oldListen := listenAndServe
+	listenAndServe = func(addr string, handler http.Handler) error { return nil }
+	t.Cleanup(func() { listenAndServe = oldListen })
+
+	if err := run(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRun_RetentionDaysOverride(t *testing.T) {
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpDir := tempDir(t)
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(wd) })
+
+	_ = os.Setenv("GROQ_API_KEY", "test")
+	_ = os.Setenv("METRICS_DB_PATH", filepath.Join(tmpDir, "metrics.db"))
+	_ = os.Setenv("METRICS_RETENTION_DAYS", "7")
+	t.Cleanup(func() {
+		_ = os.Unsetenv("GROQ_API_KEY")
+		_ = os.Unsetenv("METRICS_DB_PATH")
+		_ = os.Unsetenv("METRICS_RETENTION_DAYS")
+	})
+
+	oldListen := listenAndServe
+	listenAndServe = func(addr string, handler http.Handler) error { return nil }
+	t.Cleanup(func() { listenAndServe = oldListen })
+
+	if err := run(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRun_DefaultPort(t *testing.T) {
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpDir := tempDir(t)
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(wd) })
+
+	_ = os.Unsetenv("PORT")
+	_ = os.Setenv("GROQ_API_KEY", "test")
+	_ = os.Setenv("METRICS_DB_PATH", filepath.Join(tmpDir, "metrics.db"))
+	t.Cleanup(func() {
+		_ = os.Unsetenv("GROQ_API_KEY")
+		_ = os.Unsetenv("METRICS_DB_PATH")
+	})
+
+	oldListen := listenAndServe
+	var gotAddr string
+	listenAndServe = func(addr string, handler http.Handler) error {
+		gotAddr = addr
+		return nil
+	}
+	t.Cleanup(func() { listenAndServe = oldListen })
+
+	if err := run(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if gotAddr != ":8080" {
+		t.Fatalf("expected :8080, got %s", gotAddr)
+	}
+}
+
+func TestMain_LogsFatalOnError(t *testing.T) {
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpDir := tempDir(t)
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(wd) })
+
+	_ = os.Setenv("GROQ_API_KEY", "test")
+	_ = os.Setenv("METRICS_DB_PATH", filepath.Join(tmpDir, "metrics.db"))
+	t.Cleanup(func() {
+		_ = os.Unsetenv("GROQ_API_KEY")
+		_ = os.Unsetenv("METRICS_DB_PATH")
+	})
+
+	oldListen := listenAndServe
+	listenAndServe = func(addr string, handler http.Handler) error { return errors.New("listen fail") }
+	oldLogFatal := logFatal
+	called := false
+	logFatal = func(v ...interface{}) { called = true }
+	t.Cleanup(func() {
+		listenAndServe = oldListen
+		logFatal = oldLogFatal
+	})
+
+	main()
+	if !called {
+		t.Fatal("expected logFatal to be called")
+	}
+}
+
+func tempDir(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp(".", "tmp-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(absDir) })
+	return absDir
 }

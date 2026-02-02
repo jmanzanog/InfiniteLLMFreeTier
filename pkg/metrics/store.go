@@ -8,6 +8,12 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+var (
+	openDB         = sql.Open
+	sqliteDriver   = "sqlite"
+	migrateStoreFn = func(store *sqliteStore) error { return store.migrate() }
+)
+
 // RequestRecord represents a single request record in the database
 type RequestRecord struct {
 	ID           int64     `json:"id"`
@@ -69,13 +75,13 @@ type sqliteStore struct {
 func NewStore(dbPath string) (Store, error) {
 	// Enable WAL mode and busy timeout for better concurrency
 	dsn := fmt.Sprintf("%s?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)", dbPath)
-	db, err := sql.Open("sqlite", dsn)
+	db, err := openDB(sqliteDriver, dsn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 
 	store := &sqliteStore{db: db}
-	if err := store.migrate(); err != nil {
+	if err := migrateStoreFn(store); err != nil {
 		return nil, fmt.Errorf("failed to migrate database: %w", err)
 	}
 

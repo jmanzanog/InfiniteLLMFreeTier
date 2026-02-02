@@ -12,6 +12,11 @@ import (
 	"github.com/jmanzanog/InfiniteLLMFreeTier/pkg/api"
 )
 
+var (
+	jsonMarshal   = json.Marshal
+	jsonUnmarshal = json.Unmarshal
+)
+
 type Provider interface {
 	Name() string
 	Chat(ctx context.Context, req *api.CreateChatCompletionRequest) (*http.Response, error)
@@ -68,38 +73,22 @@ func (p *baseProvider) prepareRequest(req *api.CreateChatCompletionRequest) ([]b
 	// Critical: Remove null fields as some providers (Groq, Mistral) reject them.
 
 	// 1. Initial marshal
-	tempBody, err := json.Marshal(localReq)
+	tempBody, err := jsonMarshal(localReq)
 	if err != nil {
 		return nil, err
 	}
 
 	// 2. Unmarshal to map
 	var rawMap map[string]interface{}
-	if err := json.Unmarshal(tempBody, &rawMap); err != nil {
+	if err := jsonUnmarshal(tempBody, &rawMap); err != nil {
 		return nil, err
 	}
 
 	// 3. Recursively remove nulls
-	var cleanMap func(m map[string]interface{})
-	cleanMap = func(m map[string]interface{}) {
-		for k, v := range m {
-			if v == nil {
-				delete(m, k)
-			} else if nestedMap, ok := v.(map[string]interface{}); ok {
-				cleanMap(nestedMap)
-			} else if nestedSlice, ok := v.([]interface{}); ok {
-				for _, item := range nestedSlice {
-					if itemMap, ok := item.(map[string]interface{}); ok {
-						cleanMap(itemMap)
-					}
-				}
-			}
-		}
-	}
 	cleanMap(rawMap)
 
 	// 4. Final clean marshal
-	body, err := json.Marshal(rawMap)
+	body, err := jsonMarshal(rawMap)
 	if err != nil {
 		return nil, err
 	}
@@ -112,6 +101,22 @@ func (p *baseProvider) prepareRequest(req *api.CreateChatCompletionRequest) ([]b
 	slog.Info("Request Body", "component", "provider", "provider_name", p.config.Name, "body_truncated", logBody)
 
 	return body, nil
+}
+
+func cleanMap(m map[string]interface{}) {
+	for k, v := range m {
+		if v == nil {
+			delete(m, k)
+		} else if nestedMap, ok := v.(map[string]interface{}); ok {
+			cleanMap(nestedMap)
+		} else if nestedSlice, ok := v.([]interface{}); ok {
+			for _, item := range nestedSlice {
+				if itemMap, ok := item.(map[string]interface{}); ok {
+					cleanMap(itemMap)
+				}
+			}
+		}
+	}
 }
 
 // performChat handles common HTTP logic: prepare, auth, send.
@@ -283,9 +288,9 @@ func (p *GeminiProvider) Chat(ctx context.Context, req *api.CreateChatCompletion
 		// Simplify: Assume content is string. Extract via marshal/unmarshal to avoid complex type assertion.
 		textVal := ""
 
-		b, _ := json.Marshal(msg)
+		b, _ := jsonMarshal(msg)
 		var tempMap map[string]interface{}
-		_ = json.Unmarshal(b, &tempMap)
+		_ = jsonUnmarshal(b, &tempMap)
 
 		if contentStr, ok := tempMap["content"].(string); ok {
 			textVal = contentStr
@@ -299,7 +304,7 @@ func (p *GeminiProvider) Chat(ctx context.Context, req *api.CreateChatCompletion
 		}
 	}
 
-	bodyBytes, err := json.Marshal(geminiReq)
+	bodyBytes, err := jsonMarshal(geminiReq)
 	if err != nil {
 		return nil, err
 	}
@@ -335,7 +340,7 @@ func (p *GeminiProvider) Chat(ctx context.Context, req *api.CreateChatCompletion
 
 	// 5. Parse Gemini response to OpenAI format
 	var gResp geminiResponse
-	if err := json.Unmarshal(geminiRespBytes, &gResp); err != nil {
+	if err := jsonUnmarshal(geminiRespBytes, &gResp); err != nil {
 		return nil, err
 	}
 
@@ -362,7 +367,7 @@ func (p *GeminiProvider) Chat(ctx context.Context, req *api.CreateChatCompletion
 		},
 	}
 
-	openaiBytes, err := json.Marshal(openaiResp)
+	openaiBytes, err := jsonMarshal(openaiResp)
 	if err != nil {
 		return nil, err
 	}
