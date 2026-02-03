@@ -54,9 +54,9 @@ jobs:
                   govulncheck ./...
 
             - name: Security Audit (gosec)
-              uses: securego/gosec@master
-              with:
-                  args: ./...
+              run: |
+                  go install github.com/securego/gosec/v2/cmd/gosec@latest
+                  gosec ./...
 
             - name: Check formatting (gofmt)
               run: |
