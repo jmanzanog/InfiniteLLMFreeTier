@@ -14,7 +14,7 @@ InfiniteLLM Gateway is a high-performance, developer-friendly LLM API Proxy desi
 
 ## 🛠 Tech Stack
 
-- **Language**: Go 1.25.5
+- **Language**: Go 1.25.6
 - **Router**: [go-chi/chi](https://github.com/go-chi/chi)
 - **Code Generation**: [oapi-codegen](https://github.com/oapi-codegen/oapi-codegen) (Strict Server mode)
 - **CI/CD**: GitHub Actions with Security Auditing (Gosec, Govulncheck) & GHCR Publishing
@@ -36,7 +36,7 @@ The project follows a clean, modular architecture inspired by Domain-Driven Desi
 
 ### Prerequisites
 
-- Go 1.25.5 or higher.
+- Go 1.25.6 or higher.
 - A `.env` file in the root directory.
 
 ### Environment Variables
