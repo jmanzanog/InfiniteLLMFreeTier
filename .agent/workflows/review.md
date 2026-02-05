@@ -1,6 +1,6 @@
 ---
 name: Code Review
-description: Realiza un Code Review exhaustivo comparando el estado actual con la rama main.
+description: Performs a comprehensive Code Review comparing the current state with the main branch.
 ---
 
 1. Execute the command: `powershell -ExecutionPolicy Bypass -File "$HOME\.agent\skills\code_review\get_changes.ps1"`
