@@ -1,5 +1,7 @@
 # InfiniteLLM Gateway
 
+[![codecov](https://codecov.io/gh/jmanzanog/InfiniteLLMFreeTier/graph/badge.svg)](https://codecov.io/gh/jmanzanog/InfiniteLLMFreeTier)
+
 InfiniteLLM Gateway is a high-performance, developer-friendly LLM API proxy that aggregates and load-balances multiple free-tier LLM providers (Groq, Cerebras, Mistral, OpenRouter, and **Gemini Native**). It exposes a single OpenAI-compatible endpoint with automatic failover and streaming support.
 
 ## Key Features
