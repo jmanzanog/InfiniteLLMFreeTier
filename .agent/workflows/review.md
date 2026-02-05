@@ -4,6 +4,6 @@ description: Performs a comprehensive Code Review comparing the current state wi
 ---
 
 1. Detect the Operating System.
-2. Invoke the Code Review skill located at `"$HOME\.agent\skills\code_review\SKILL.md"` (Windows) or `"$HOME/.agent/skills/code_review/SKILL.md"` (Unix).
+2. Invoke the Code Review skill located in the user's home directory at `.agent/skills/code_review/SKILL.md`.
 3. Execute the `get_changes` script defined in the skill for your OS.
 4. Generate the report in Spanish.
