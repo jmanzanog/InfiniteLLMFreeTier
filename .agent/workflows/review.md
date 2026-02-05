@@ -3,5 +3,7 @@ name: Code Review
 description: Performs a comprehensive Code Review comparing the current state with the main branch.
 ---
 
-1. Execute the command: `powershell -ExecutionPolicy Bypass -File "$HOME\.agent\skills\code_review\get_changes.ps1"`
-2. Follow the instructions in the skill located at "$HOME\.agent\skills\code_review\SKILL.md" to analyze the diff and generate the report in Spanish.
+1. Detect the Operating System.
+2. Invoke the Code Review skill located at `"$HOME\.agent\skills\code_review\SKILL.md"` (Windows) or `"$HOME/.agent/skills/code_review/SKILL.md"` (Unix).
+3. Execute the `get_changes` script defined in the skill for your OS.
+4. Generate the report in Spanish.
