@@ -20,17 +20,22 @@ import (
 )
 
 var (
-	listenAndServe = func(addr string, handler http.Handler) error {
-		srv := &http.Server{
+	// newHTTPServer creates a configured HTTP server with timeouts.
+	// Exposed as var to allow overriding in tests if needed, or simply for testability.
+	newHTTPServer = func(addr string, handler http.Handler) *http.Server {
+		return &http.Server{
 			Addr:              addr,
 			Handler:           handler,
 			ReadHeaderTimeout: 10 * time.Second,
 			ReadTimeout:       60 * time.Second,
-			WriteTimeout:      120 * time.Second, // Generous for streaming responses
+			WriteTimeout:      120 * time.Second,
 			IdleTimeout:       120 * time.Second,
 			MaxHeaderBytes:    1 << 20, // 1MB
 		}
-		return srv.ListenAndServe()
+	}
+
+	listenAndServe = func(addr string, handler http.Handler) error {
+		return newHTTPServer(addr, handler).ListenAndServe()
 	}
 	logFatal = log.Fatal
 )

@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jmanzanog/InfiniteLLMFreeTier/pkg/api"
@@ -407,6 +408,30 @@ func TestMain_LogsFatalOnError(t *testing.T) {
 	main()
 	if !called {
 		t.Fatal("expected logFatal to be called")
+	}
+}
+
+func TestNewHTTPServer_Configuration(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})
+	server := newHTTPServer(":8080", handler)
+
+	if server.Addr != ":8080" {
+		t.Errorf("Expected Addr :8080, got %s", server.Addr)
+	}
+	if server.ReadHeaderTimeout != 10*time.Second {
+		t.Errorf("Expected ReadHeaderTimeout 10s, got %v", server.ReadHeaderTimeout)
+	}
+	if server.ReadTimeout != 60*time.Second {
+		t.Errorf("Expected ReadTimeout 60s, got %v", server.ReadTimeout)
+	}
+	if server.WriteTimeout != 120*time.Second {
+		t.Errorf("Expected WriteTimeout 120s, got %v", server.WriteTimeout)
+	}
+	if server.IdleTimeout != 120*time.Second {
+		t.Errorf("Expected IdleTimeout 120s, got %v", server.IdleTimeout)
+	}
+	if server.MaxHeaderBytes != 1<<20 {
+		t.Errorf("Expected MaxHeaderBytes 1MB, got %d", server.MaxHeaderBytes)
 	}
 }
 
