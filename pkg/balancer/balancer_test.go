@@ -270,3 +270,274 @@ func TestClassifyError(t *testing.T) {
 		})
 	}
 }
+
+func TestCircuitBreaker(t *testing.T) {
+	t.Run("TripsAfterThreshold", func(t *testing.T) {
+		// Set low threshold for testing
+		t.Setenv("CIRCUIT_FAILURE_THRESHOLD", "2")
+		t.Setenv("CIRCUIT_COOLDOWN_BASE_SECONDS", "1")
+
+		p1 := &mockProvider{name: "FailingProvider", code: 429}
+		p2 := &mockProvider{name: "BackupProvider", code: 200}
+		lb := NewBalancer([]provider.Provider{p1, p2})
+
+		// First request - p1 fails, failover to p2
+		result1, err := lb.ChatWithResult(context.Background(), &api.CreateChatCompletionRequest{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result1.ProviderName != "BackupProvider" {
+			t.Errorf("Expected BackupProvider, got %s", result1.ProviderName)
+		}
+
+		// Second request - should still try p1 (threshold not reached)
+		result2, _ := lb.ChatWithResult(context.Background(), &api.CreateChatCompletionRequest{})
+		if result2.ProviderName != "BackupProvider" {
+			t.Errorf("Expected BackupProvider, got %s", result2.ProviderName)
+		}
+	})
+
+	t.Run("ProviderRecovery", func(t *testing.T) {
+		p := &mockProvider{name: "RecoveringProvider", code: 200}
+		lb := NewBalancer([]provider.Provider{p})
+
+		// Simulate failure recording then success
+		lb.recordProviderFailure("RecoveringProvider", 429)
+		lb.recordProviderFailure("RecoveringProvider", 429)
+
+		// Now record success - should reset
+		lb.recordProviderSuccess("RecoveringProvider")
+
+		// Check state is reset
+		status := lb.GetProviderStatus()
+		if status["RecoveringProvider"]["consecutive_fails"].(int) != 0 {
+			t.Error("Expected consecutive_fails to be reset to 0")
+		}
+	})
+
+	t.Run("NonExistentProvider", func(t *testing.T) {
+		lb := NewBalancer([]provider.Provider{})
+
+		// Should not panic on non-existent provider
+		lb.recordProviderFailure("NonExistent", 429)
+		lb.recordProviderSuccess("NonExistent")
+
+		if !lb.isProviderAvailable("NonExistent") {
+			t.Error("Non-existent provider should be available")
+		}
+	})
+
+	t.Run("OnlyTripsOn429And5xx", func(t *testing.T) {
+		p := &mockProvider{name: "TestProvider", code: 200}
+		lb := NewBalancer([]provider.Provider{p})
+
+		// 400 should not trip circuit breaker
+		lb.recordProviderFailure("TestProvider", 400)
+		lb.recordProviderFailure("TestProvider", 400)
+		lb.recordProviderFailure("TestProvider", 400)
+
+		status := lb.GetProviderStatus()
+		if status["TestProvider"]["consecutive_fails"].(int) != 0 {
+			t.Error("400 errors should not increment consecutive_fails")
+		}
+	})
+
+	t.Run("AllProvidersInCooldown", func(t *testing.T) {
+		t.Setenv("CIRCUIT_FAILURE_THRESHOLD", "1")
+		t.Setenv("CIRCUIT_COOLDOWN_BASE_SECONDS", "60")
+
+		p1 := &mockProvider{name: "P1", code: 429}
+		lb := NewBalancer([]provider.Provider{p1})
+
+		// Trip the circuit breaker
+		lb.recordProviderFailure("P1", 429)
+
+		// Set cooldown manually
+		lb.statesMu.RLock()
+		state := lb.providerStates["P1"]
+		lb.statesMu.RUnlock()
+		state.mu.Lock()
+		state.cooldownUntil = time.Now().Add(time.Minute)
+		state.mu.Unlock()
+
+		// Now all providers should be in cooldown
+		_, err := lb.ChatWithResult(context.Background(), &api.CreateChatCompletionRequest{})
+		if err == nil {
+			t.Error("Expected error when all providers in cooldown")
+		}
+		if err.Error() != "all providers are in cooldown, try again later" {
+			t.Errorf("Unexpected error message: %s", err.Error())
+		}
+	})
+}
+
+func TestGetProviderStatus(t *testing.T) {
+	p1 := &mockProvider{name: "Provider1", code: 200}
+	p2 := &mockProvider{name: "Provider2", code: 200}
+	lb := NewBalancer([]provider.Provider{p1, p2})
+
+	status := lb.GetProviderStatus()
+
+	if len(status) != 2 {
+		t.Errorf("Expected 2 providers in status, got %d", len(status))
+	}
+
+	for name, info := range status {
+		if _, ok := info["available"]; !ok {
+			t.Errorf("Provider %s missing 'available' field", name)
+		}
+		if _, ok := info["consecutive_fails"]; !ok {
+			t.Errorf("Provider %s missing 'consecutive_fails' field", name)
+		}
+		if _, ok := info["total_failures"]; !ok {
+			t.Errorf("Provider %s missing 'total_failures' field", name)
+		}
+	}
+}
+
+func TestBalancerConfigFromEnv(t *testing.T) {
+	t.Run("DefaultCooldownBase", func(t *testing.T) {
+		result := getCooldownBase()
+		expected := 30 * time.Second
+		if result != expected {
+			t.Errorf("Expected %v, got %v", expected, result)
+		}
+	})
+
+	t.Run("CustomCooldownBase", func(t *testing.T) {
+		t.Setenv("CIRCUIT_COOLDOWN_BASE_SECONDS", "60")
+		result := getCooldownBase()
+		expected := 60 * time.Second
+		if result != expected {
+			t.Errorf("Expected %v, got %v", expected, result)
+		}
+	})
+
+	t.Run("DefaultMaxCooldown", func(t *testing.T) {
+		result := getMaxCooldown()
+		expected := 5 * time.Minute
+		if result != expected {
+			t.Errorf("Expected %v, got %v", expected, result)
+		}
+	})
+
+	t.Run("CustomMaxCooldown", func(t *testing.T) {
+		t.Setenv("CIRCUIT_MAX_COOLDOWN_SECONDS", "120")
+		result := getMaxCooldown()
+		expected := 120 * time.Second
+		if result != expected {
+			t.Errorf("Expected %v, got %v", expected, result)
+		}
+	})
+
+	t.Run("DefaultFailureThreshold", func(t *testing.T) {
+		result := getFailureThreshold()
+		expected := 3
+		if result != expected {
+			t.Errorf("Expected %d, got %d", expected, result)
+		}
+	})
+
+	t.Run("CustomFailureThreshold", func(t *testing.T) {
+		t.Setenv("CIRCUIT_FAILURE_THRESHOLD", "5")
+		result := getFailureThreshold()
+		expected := 5
+		if result != expected {
+			t.Errorf("Expected %d, got %d", expected, result)
+		}
+	})
+
+	t.Run("InvalidEnvValues", func(t *testing.T) {
+		t.Setenv("CIRCUIT_COOLDOWN_BASE_SECONDS", "invalid")
+		t.Setenv("CIRCUIT_MAX_COOLDOWN_SECONDS", "invalid")
+		t.Setenv("CIRCUIT_FAILURE_THRESHOLD", "invalid")
+
+		if getCooldownBase() != 30*time.Second {
+			t.Error("Should fallback to default on invalid CIRCUIT_COOLDOWN_BASE_SECONDS")
+		}
+		if getMaxCooldown() != 5*time.Minute {
+			t.Error("Should fallback to default on invalid CIRCUIT_MAX_COOLDOWN_SECONDS")
+		}
+		if getFailureThreshold() != 3 {
+			t.Error("Should fallback to default on invalid CIRCUIT_FAILURE_THRESHOLD")
+		}
+	})
+}
+
+func TestBalancer_AllTransportErrors(t *testing.T) {
+	p1 := &mockProvider{name: "p1", fail: errors.New("error1")}
+	lb := NewBalancer([]provider.Provider{p1})
+
+	_, err := lb.ChatWithResult(context.Background(), &api.CreateChatCompletionRequest{})
+	if err == nil {
+		t.Error("Expected error when all providers fail with transport errors")
+	}
+	if !errors.Is(err, errors.Unwrap(err)) && err.Error() == "" {
+		t.Error("Expected wrapped error")
+	}
+}
+
+func TestCircuitBreaker_MaxCooldownCap(t *testing.T) {
+	// Set very low max cooldown to test capping
+	t.Setenv("CIRCUIT_FAILURE_THRESHOLD", "1")
+	t.Setenv("CIRCUIT_COOLDOWN_BASE_SECONDS", "100")
+	t.Setenv("CIRCUIT_MAX_COOLDOWN_SECONDS", "10")
+
+	p := &mockProvider{name: "TestProvider", code: 200}
+	lb := NewBalancer([]provider.Provider{p})
+
+	// Trip circuit breaker multiple times to trigger exponential backoff
+	lb.recordProviderFailure("TestProvider", 500)
+	lb.recordProviderFailure("TestProvider", 500)
+	lb.recordProviderFailure("TestProvider", 500)
+	lb.recordProviderFailure("TestProvider", 500)
+
+	// The cooldown should be capped at maxCooldown (10s), not exponentially higher
+	status := lb.GetProviderStatus()
+	remaining, ok := status["TestProvider"]["cooldown_remaining_seconds"]
+	if ok && remaining.(int) > 15 {
+		t.Errorf("Cooldown should be capped at ~10s, got %d", remaining.(int))
+	}
+}
+
+func TestGetProviderStatus_WithActiveCooldown(t *testing.T) {
+	t.Setenv("CIRCUIT_FAILURE_THRESHOLD", "1")
+	t.Setenv("CIRCUIT_COOLDOWN_BASE_SECONDS", "60")
+
+	p := &mockProvider{name: "CooldownProvider", code: 200}
+	lb := NewBalancer([]provider.Provider{p})
+
+	// Trip the circuit breaker
+	lb.recordProviderFailure("CooldownProvider", 429)
+
+	status := lb.GetProviderStatus()
+	info := status["CooldownProvider"]
+
+	// Should have cooldown info
+	if _, ok := info["cooldown_until"]; !ok {
+		t.Error("Expected cooldown_until field when in cooldown")
+	}
+	if _, ok := info["cooldown_remaining_seconds"]; !ok {
+		t.Error("Expected cooldown_remaining_seconds field when in cooldown")
+	}
+	if info["available"].(bool) {
+		t.Error("Provider should not be available when in cooldown")
+	}
+}
+
+func TestCircuitBreaker_5xxTripsBreaker(t *testing.T) {
+	t.Setenv("CIRCUIT_FAILURE_THRESHOLD", "2")
+	t.Setenv("CIRCUIT_COOLDOWN_BASE_SECONDS", "30")
+
+	p := &mockProvider{name: "Server5xx", code: 200}
+	lb := NewBalancer([]provider.Provider{p})
+
+	// 5xx errors should trip circuit breaker
+	lb.recordProviderFailure("Server5xx", 500)
+	lb.recordProviderFailure("Server5xx", 502)
+
+	status := lb.GetProviderStatus()
+	if status["Server5xx"]["consecutive_fails"].(int) != 2 {
+		t.Errorf("Expected 2 consecutive fails, got %d", status["Server5xx"]["consecutive_fails"].(int))
+	}
+}

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/jmanzanog/InfiniteLLMFreeTier/pkg/api"
+	"github.com/jmanzanog/InfiniteLLMFreeTier/pkg/httpclient"
 )
 
 var (
@@ -43,9 +44,7 @@ func NewCustomProvider(name, baseURL, apiKey, defaultModel string) Provider {
 			APIKey:       apiKey,
 			DefaultModel: defaultModel,
 		},
-		client: &http.Client{
-			Timeout: 60 * time.Second,
-		},
+		client: httpclient.New(),
 	}}
 }
 
@@ -152,7 +151,7 @@ func NewGroqProvider(apiKey, defaultModel string) Provider {
 			APIKey:       apiKey,
 			DefaultModel: defaultModel,
 		},
-		client: &http.Client{Timeout: 60 * time.Second},
+		client: httpclient.New(),
 	}}
 }
 
@@ -175,7 +174,7 @@ func NewMistralProvider(apiKey, defaultModel string) Provider {
 			APIKey:       apiKey,
 			DefaultModel: defaultModel,
 		},
-		client: &http.Client{Timeout: 60 * time.Second},
+		client: httpclient.New(),
 	}}
 }
 
@@ -198,7 +197,7 @@ func NewOpenRouterProvider(apiKey, defaultModel string) Provider {
 			APIKey:       apiKey,
 			DefaultModel: defaultModel,
 		},
-		client: &http.Client{Timeout: 60 * time.Second},
+		client: httpclient.New(),
 	}}
 }
 
@@ -225,7 +224,7 @@ func NewCerebrasProvider(apiKey, defaultModel string) Provider {
 			APIKey:       apiKey,
 			DefaultModel: defaultModel,
 		},
-		client: &http.Client{Timeout: 60 * time.Second},
+		client: httpclient.New(),
 	}}
 }
 
@@ -249,9 +248,7 @@ func NewGeminiProvider(apiKey, defaultModel string) Provider {
 			APIKey:       apiKey,
 			DefaultModel: defaultModel,
 		},
-		client: &http.Client{
-			Timeout: 60 * time.Second,
-		},
+		client: httpclient.New(),
 	}}
 }
 
@@ -278,6 +275,30 @@ type geminiResponse struct {
 }
 
 func (p *GeminiProvider) Chat(ctx context.Context, req *api.CreateChatCompletionRequest) (*http.Response, error) {
+	// Check for streaming request - Gemini native API requires SSE for streaming
+	// which is not yet implemented. Return a clear error instead of silent failure.
+	if req.Stream != nil && *req.Stream {
+		slog.Warn("Streaming requested but not supported for Gemini provider",
+			"provider", p.config.Name,
+			"model", p.config.DefaultModel,
+		)
+		// Return a 501 Not Implemented response
+		errorResp := map[string]interface{}{
+			"error": map[string]interface{}{
+				"message": "Streaming (stream=true) is not supported for Gemini provider. Use stream=false or omit the parameter.",
+				"type":    "not_implemented",
+				"code":    "streaming_not_supported",
+			},
+		}
+		errorBytes, _ := jsonMarshal(errorResp)
+		return &http.Response{
+			StatusCode:    http.StatusNotImplemented,
+			Body:          io.NopCloser(bytes.NewBuffer(errorBytes)),
+			Header:        http.Header{"Content-Type": []string{"application/json"}},
+			ContentLength: int64(len(errorBytes)),
+		}, nil
+	}
+
 	// 1. Convert OpenAI request to Gemini Native format
 	geminiReq := geminiRequest{}
 	for _, msg := range req.Messages {
@@ -323,10 +344,14 @@ func (p *GeminiProvider) Chat(ctx context.Context, req *api.CreateChatCompletion
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = resp.Body.Close() }()
+	// NOTE: Do NOT defer resp.Body.Close() here. The caller (balancer) is responsible
+	// for closing the body. Closing it here would return a closed body, breaking
+	// failover logic and response logging.
 
 	// 4. Read Gemini response
 	geminiRespBytes, err := io.ReadAll(resp.Body)
+	// Close original body after reading since we will return a new one
+	_ = resp.Body.Close()
 	if err != nil {
 		return nil, err
 	}

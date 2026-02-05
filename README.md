@@ -8,7 +8,10 @@ InfiniteLLM Gateway is a high-performance, developer-friendly LLM API proxy that
 - **Native Gemini Support**: Adapts the native Gemini API to the OpenAI format.
 - **Intelligent Load Balancing**: Round-robin distribution across providers.
 - **Robust Failover**: Automatically retries the next available provider if one fails or returns a `429 Too Many Requests` or `5xx Server Error`.
+- **Circuit Breaker**: Temporarily disables providers that repeatedly fail (configurable threshold and exponential backoff).
 - **Streaming Support**: Transparent proxying of Server-Sent Events (SSE) for real-time model responses.
+- **Production-Ready HTTP Server**: Configured timeouts (read, write, idle) and request body limits.
+- **Request Tracing**: Automatic `X-Request-ID` generation/propagation for distributed tracing.
 - **Contract-First Development**: API types and server interfaces are generated from an OpenAPI 3.0 specification.
 - **Developer Ready**: Includes local debugging configurations and a full verification suite.
 
@@ -58,6 +61,14 @@ FIXED_PROVIDER=Gemini          # Force routing to a specific provider
 # Metrics (optional)
 METRICS_DB_PATH=metrics.db     # SQLite database path for metrics persistence
 METRICS_RETENTION_DAYS=30      # How many days to keep metrics (default: 30)
+
+# Circuit Breaker (optional)
+CIRCUIT_FAILURE_THRESHOLD=3           # Consecutive failures to trip breaker (default: 3)
+CIRCUIT_COOLDOWN_BASE_SECONDS=30      # Initial cooldown duration (default: 30)
+CIRCUIT_MAX_COOLDOWN_SECONDS=300      # Maximum cooldown with exponential backoff (default: 300)
+
+# Server Hardening (optional)
+MAX_REQUEST_BODY_BYTES=10485760       # Max request body size in bytes (default: 10MB)
 ```
 
 ### Running the Gateway

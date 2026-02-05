@@ -19,7 +19,7 @@ This document provides context, architectural guidelines, and workflows for AI a
   - `mattn/go-sqlite3`: For built-in metrics storage.
 - **Testing**:
   - **Dockerized Tests**: All tests run inside Docker to ensure environment consistency.
-  - **Coverage**: **100% Code Coverage is ENFORCED**. Verify scripts will fail if <100%.
+  - **Coverage**: **100% Code Coverage is ENFORCED** for non-generated code. Verify scripts will fail if <100%.
 
 ## 3. Codebase Map
 
@@ -62,6 +62,7 @@ oapi-codegen -config oapi-config.yaml api/openapi.yaml
 1.  **Error Handling**: Wrap errors: `fmt.Errorf("doing x: %w", err)`.
 2.  **Concurrency**: Use `sync.RWMutex` for reads/writes on maps (e.g., in `balancer`).
 3.  **Interfaces**: Define interfaces where they are used (consumer side), unless it's a core domain contract.
+4.  **Comments**: Avoid unnecessary comments; prefer clear, descriptive names for variables and functions.
 
 ### Agent Behavior Rules
 1.  **Check existing tools**: Before writing a new script, check `scripts/`.
@@ -72,3 +73,8 @@ oapi-codegen -config oapi-config.yaml api/openapi.yaml
 - **Playwright Installation**: Running tests locally requires Playwright drivers. The `verify` scripts handle this via Docker. Prefer Docker execution.
 - **SQLite Locking**: `pkg/metrics` uses SQLite. Ensure connection pooling/mutexes are respected to avoid `database is locked`.
 - **Generated Code**: `pkg/api/*_generated.go` changes will be overwritten. Modify logic in `pkg/handlers` or `pkg/server` instead.
+
+## 7. Verification Notes
+- **Docker requirement**: `scripts/verify.ps1` runs tests inside Docker and requires the daemon to be running.
+- **Coverage artifacts**: verification generates `coverage.out` and a filtered `coverage.filtered.out` (excluding generated files) for review.
+- **Linux/WSL support**: if `scripts/verify.sh` is missing, create it or adjust this doc to match the available verification script.

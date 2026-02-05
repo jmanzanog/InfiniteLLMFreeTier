@@ -479,3 +479,69 @@ func TestConstructors_WithCustomModels(t *testing.T) {
 		})
 	}
 }
+
+func TestGemini_StreamingNotSupported(t *testing.T) {
+	// Test that streaming requests return 501 Not Implemented
+	p := NewGeminiProvider("k", "")
+	gp := p.(*GeminiProvider)
+
+	streamTrue := true
+	req := &api.CreateChatCompletionRequest{
+		Messages: []api.ChatCompletionRequestMessage{{Role: "user", Content: "test"}},
+		Stream:   &streamTrue,
+	}
+
+	resp, err := gp.Chat(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusNotImplemented {
+		t.Errorf("Expected 501 Not Implemented, got %d", resp.StatusCode)
+	}
+
+	// Verify error response body
+	var errorResp map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&errorResp); err != nil {
+		t.Fatalf("Failed to decode error response: %v", err)
+	}
+
+	errObj, ok := errorResp["error"].(map[string]interface{})
+	if !ok {
+		t.Fatal("Expected 'error' object in response")
+	}
+
+	if errObj["code"] != "streaming_not_supported" {
+		t.Errorf("Expected code 'streaming_not_supported', got %v", errObj["code"])
+	}
+}
+
+func TestGemini_StreamFalseAllowed(t *testing.T) {
+	// Test that stream=false works normally
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{ "candidates": [ { "content": { "parts": [ { "text": "ok" } ] } } ] }`))
+	}))
+	defer server.Close()
+
+	p := NewGeminiProvider("k", "")
+	gp := p.(*GeminiProvider)
+	gp.config.BaseURL = server.URL + "/"
+
+	streamFalse := false
+	req := &api.CreateChatCompletionRequest{
+		Messages: []api.ChatCompletionRequestMessage{{Role: "user", Content: "test"}},
+		Stream:   &streamFalse,
+	}
+
+	resp, err := gp.Chat(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("Expected 200, got %d", resp.StatusCode)
+	}
+}
