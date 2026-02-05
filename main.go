@@ -14,13 +14,30 @@ import (
 	"github.com/jmanzanog/InfiniteLLMFreeTier/pkg/config"
 	"github.com/jmanzanog/InfiniteLLMFreeTier/pkg/handlers"
 	"github.com/jmanzanog/InfiniteLLMFreeTier/pkg/metrics"
+	"github.com/jmanzanog/InfiniteLLMFreeTier/pkg/middleware"
 	"github.com/jmanzanog/InfiniteLLMFreeTier/pkg/server"
 	"github.com/joho/godotenv"
 )
 
 var (
-	listenAndServe = http.ListenAndServe
-	logFatal       = log.Fatal
+	// newHTTPServer creates a configured HTTP server with timeouts.
+	// Exposed as var to allow overriding in tests if needed, or simply for testability.
+	newHTTPServer = func(addr string, handler http.Handler) *http.Server {
+		return &http.Server{
+			Addr:              addr,
+			Handler:           handler,
+			ReadHeaderTimeout: 10 * time.Second,
+			ReadTimeout:       60 * time.Second,
+			WriteTimeout:      120 * time.Second,
+			IdleTimeout:       120 * time.Second,
+			MaxHeaderBytes:    1 << 20, // 1MB
+		}
+	}
+
+	listenAndServe = func(addr string, handler http.Handler) error {
+		return newHTTPServer(addr, handler).ListenAndServe()
+	}
+	logFatal = log.Fatal
 )
 
 func run() error {
@@ -77,8 +94,13 @@ func run() error {
 	}
 	srv := server.NewServer(lb)
 
-	// 5. Setup Router and Handlers
+	// 5. Setup Router and Handlers with Middleware
 	r := chi.NewRouter()
+
+	// Apply middleware stack
+	r.Use(middleware.RequestID)
+	r.Use(middleware.MaxBodySize)
+
 	r.Get("/health", handlers.Health)
 
 	statsHandler := handlers.NewStatsHandler(collector)
@@ -92,7 +114,12 @@ func run() error {
 		BaseURL:    "/v1",
 	})
 
-	slog.Info("Gateway started", "port", port)
+	slog.Info("Gateway started",
+		"port", port,
+		"read_timeout", "60s",
+		"write_timeout", "120s",
+		"idle_timeout", "120s",
+	)
 	return listenAndServe(":"+port, r)
 }
 
