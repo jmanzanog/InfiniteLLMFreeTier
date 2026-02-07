@@ -1,4 +1,4 @@
-FROM --platform=$BUILDPLATFORM golang:1.25.6-alpine AS builder
+FROM --platform=$BUILDPLATFORM golang:1.26rc3-alpine AS builder
 WORKDIR /src
 
 # deps (cache-friendly)
