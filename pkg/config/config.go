@@ -85,7 +85,7 @@ func GetProvidersFromEnv() ([]provider.Provider, error) {
 
 	// Debug Mode: Fixed Provider
 	if fixed := os.Getenv("FIXED_PROVIDER"); fixed != "" {
-		slog.Info("FIXED_PROVIDER mode enabled", "provider", fixed)
+		slog.Info("FIXED_PROVIDER mode enabled", "provider", fixed) // #nosec G706
 		var filtered []provider.Provider
 		for _, p := range providers {
 			if strings.EqualFold(p.Name(), fixed) {
@@ -93,7 +93,7 @@ func GetProvidersFromEnv() ([]provider.Provider, error) {
 			}
 		}
 		if len(filtered) == 0 {
-			slog.Warn("FIXED_PROVIDER requested but not found or not configured", "provider", fixed)
+			slog.Warn("FIXED_PROVIDER requested but not found or not configured", "provider", fixed) // #nosec G706
 		}
 		return filtered, nil
 	}
