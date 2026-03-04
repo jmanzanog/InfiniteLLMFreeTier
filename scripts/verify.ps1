@@ -66,7 +66,7 @@ docker run --rm `
     -v "${PWD}:/app" `
     -v "${modCache}:/go/pkg/mod" `
     -v "${buildCache}:/root/.cache/go-build" `
-    -w /app golang:1.25 go test -v -covermode=atomic -coverprofile coverage.out ./...
+    -w /app golang:1.26 go test -v -covermode=atomic -coverprofile coverage.out ./...
 
 if ($LASTEXITCODE -ne 0) { exit 1 }
 
@@ -80,7 +80,7 @@ $coverOut = docker run --rm `
     -v "${PWD}:/app" `
     -v "${modCache}:/go/pkg/mod" `
     -v "${buildCache}:/root/.cache/go-build" `
-    -w /app golang:1.25 go tool cover -func coverage.filtered.out
+    -w /app golang:1.26 go tool cover -func coverage.filtered.out
 
 $coverOut
 
