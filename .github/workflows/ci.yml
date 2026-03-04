@@ -73,7 +73,7 @@ jobs:
       - name: Lint
         uses: golangci/golangci-lint-action@v9
         with:
-          version: v1.64.8
+          version: v2.10.1
 
       - name: Test (all tests)
         run: go test -v ./... -race -coverprofile=coverage.txt -covermode=atomic -timeout 10m
