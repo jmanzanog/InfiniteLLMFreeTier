@@ -1,84 +1,84 @@
 name: CI
 
 on:
-    pull_request:
-        branches:
-            - main
-    push:
-        branches:
-            - main
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
 
 concurrency:
-    group: ci-${{ github.ref }}
-    cancel-in-progress: true
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
-    GO_VERSION: "1.25.6"
+  GO_VERSION: "1.26.0"
 
 jobs:
-    lint-test:
-        name: Lint, Build and Test
-        runs-on: ubuntu-latest
-        if: github.event.pull_request.draft == false || github.event_name != 'pull_request'
-        permissions:
-            contents: read
-        steps:
-            - name: Checkout
-              uses: actions/checkout@v6
+  lint-test:
+    name: Lint, Build and Test
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.draft == false || github.event_name != 'pull_request'
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
 
-            - name: Set up Go
-              uses: actions/setup-go@v6
-              with:
-                  go-version: ${{ env.GO_VERSION }}
-                  cache: true
-                  cache-dependency-path: go.sum
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+          cache-dependency-path: go.sum
 
-            - name: Cache Go build
-              uses: actions/cache@v5
-              with:
-                  path: |
-                      ~/.cache/go-build
-                      ~/go/pkg/mod
-                  key: ${{ runner.os }}-go-build-${{ hashFiles('**/go.sum') }}
-                  restore-keys: |
-                      ${{ runner.os }}-go-build-
+      - name: Cache Go build
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-build-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-build-
 
-            - name: Verify go mod tidy
-              run: |
-                  go mod tidy
-                  git diff --exit-code
+      - name: Verify go mod tidy
+        run: |
+          go mod tidy
+          git diff --exit-code
 
-            - name: Security Check (govulncheck)
-              run: |
-                  go install golang.org/x/vuln/cmd/govulncheck@latest
-                  govulncheck ./...
+      - name: Security Check (govulncheck)
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
 
-            - name: Security Audit (gosec)
-              run: |
-                  go install github.com/securego/gosec/v2/cmd/gosec@latest
-                  gosec ./...
+      - name: Security Audit (gosec)
+        run: |
+          go install github.com/securego/gosec/v2/cmd/gosec@latest
+          gosec ./...
 
-            - name: Check formatting (gofmt)
-              run: |
-                  fmt_out=$(gofmt -l .)
-                  if [ -n "$fmt_out" ]; then
-                    echo "Go files need formatting:"
-                    echo "$fmt_out"
-                    exit 1
-                  fi
+      - name: Check formatting (gofmt)
+        run: |
+          fmt_out=$(gofmt -l .)
+          if [ -n "$fmt_out" ]; then
+            echo "Go files need formatting:"
+            echo "$fmt_out"
+            exit 1
+          fi
 
-            - name: Build
-              run: go build -v ./...
+      - name: Build
+        run: go build -v ./...
 
-            - name: Lint
-              uses: golangci/golangci-lint-action@v9
-              with:
-                  version: v2.7.2
+      - name: Lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v1.64.8
 
-            - name: Test (all tests)
-              run: go test -v ./... -race -coverprofile=coverage.txt -covermode=atomic -timeout 10m
+      - name: Test (all tests)
+        run: go test -v ./... -race -coverprofile=coverage.txt -covermode=atomic -timeout 10m
 
-            - name: Upload coverage reports to Codecov
-              uses: codecov/codecov-action@v5
-              with:
-                  token: ${{ secrets.CODECOV_TOKEN }}
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
