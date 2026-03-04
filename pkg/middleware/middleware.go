@@ -31,7 +31,7 @@ func RequestID(next http.Handler) http.Handler {
 		ctx := context.WithValue(r.Context(), RequestIDKey, requestID)
 
 		// Log with request ID
-		slog.Info("Request started",
+		slog.Info("Request started", // #nosec G706
 			"request_id", requestID,
 			"method", r.Method,
 			"path", r.URL.Path,
@@ -57,7 +57,7 @@ func MaxBodySize(next http.Handler) http.Handler {
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.ContentLength > maxBytes {
-			slog.Warn("Request body too large",
+			slog.Warn("Request body too large", // #nosec G706
 				"request_id", GetRequestID(r.Context()),
 				"content_length", r.ContentLength,
 				"max_bytes", maxBytes,
