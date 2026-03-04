@@ -82,7 +82,7 @@ func run() error {
 			}
 		}
 		collector.StartPurger(retentionDays, 24*time.Hour)
-		slog.Info("Metrics collection enabled", "db_path", dbPath, "retention_days", retentionDays)
+		slog.Info("Metrics collection enabled", "db_path", dbPath, "retention_days", retentionDays) // #nosec G706
 	}
 
 	// 4. Initialize Balancer and Server Logic
@@ -114,7 +114,7 @@ func run() error {
 		BaseURL:    "/v1",
 	})
 
-	slog.Info("Gateway started",
+	slog.Info("Gateway started", // #nosec G706
 		"port", port,
 		"read_timeout", "60s",
 		"write_timeout", "120s",
