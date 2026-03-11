@@ -24,56 +24,11 @@ jobs:
         uses: actions/checkout@v6
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
-          fetch-depth: 0
-
-      - name: Set up git identity
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-      - name: Compute or reuse release version
-        id: version
-        env:
-          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
-        run: |
-          set -euo pipefail
-          YEAR_MONTH="$(date -u +'%Y.%m')"
-          existing_for_commit="$(git tag --points-at "$HEAD_SHA" | grep -E "^${YEAR_MONTH}\.[0-9]+$" | sort -V | tail -n1 || true)"
-          if [ -n "$existing_for_commit" ]; then
-            VERSION="$existing_for_commit"
-          else
-            latest_for_month="$(git tag -l "${YEAR_MONTH}.*" | sort -V | tail -n1 || true)"
-            if [ -z "$latest_for_month" ]; then
-              PATCH=1
-            else
-              PATCH="${latest_for_month##*.}"
-              PATCH=$((PATCH + 1))
-            fi
-            VERSION="${YEAR_MONTH}.${PATCH}"
-            git tag -a "$VERSION" "$HEAD_SHA" -m "Release $VERSION"
-            git push origin "$VERSION"
-          fi
-          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-
-      - name: Ensure GitHub release exists
-        env:
-          GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ steps.version.outputs.version }}
-          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
-        run: |
-          set -euo pipefail
-          if gh release view "$VERSION" >/dev/null 2>&1; then
-            echo "Release $VERSION already exists"
-          else
-            gh release create "$VERSION" --target "$HEAD_SHA" --title "$VERSION" --notes "Automated release for $VERSION"
-          fi
 
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
           go-version: "1.26.1"
-          cache: true
-          cache-dependency-path: go.sum
 
       - uses: docker/setup-buildx-action@v4
 
@@ -111,9 +66,7 @@ jobs:
           context: .
           push: true
           platforms: linux/amd64,linux/arm64
-          tags: |
-            ${{ env.IMAGE }}:latest
-            ${{ env.IMAGE }}:${{ steps.version.outputs.version }}
+          tags: ${{ env.IMAGE }}:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
