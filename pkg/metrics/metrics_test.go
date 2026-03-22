@@ -424,15 +424,13 @@ func TestCollector_WorkerHandlesSaveError(t *testing.T) {
 	// Record should still work, but save will fail (logged, not panic)
 	collector.Record("TestProvider", "model", 200, 100*time.Millisecond, true, "")
 
-	// Wait for worker to process
-	time.Sleep(100 * time.Millisecond)
+	// Close drains all pending records deterministically (no sleep race)
+	_ = collector.Close()
 
 	// Verify save was attempted
 	if atomic.LoadInt32(&mock.saveCount) < 1 {
 		t.Error("Expected at least 1 save attempt")
 	}
-
-	_ = collector.Close()
 }
 
 func TestCollector_DrainHandlesSaveError(t *testing.T) {
